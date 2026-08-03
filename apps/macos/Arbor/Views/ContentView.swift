@@ -10,9 +10,8 @@ struct ContentView: View {
             SidebarView(selectedPath: $selectedPath)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
         } detail: {
-            FileBrowserView(path: selectedPath)
+            FileBrowserView(path: $selectedPath)
         }
-        .navigationTitle("Arbor")
     }
 }
 

@@ -5,11 +5,19 @@
 # Swift / Xcode
 apps/macos/build/
 apps/macos/DerivedData/
+DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcuserstate
-.DS_Store
+*.xcuserdata
 xcuserdata/
+.DS_Store
+
+# Python toolenvs
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
 
 # IDE
 .idea/
@@ -35,6 +43,9 @@ Thumbs.db
 *.log
 .cache/
 .arbor/
+
+# Local Python tooling
+.venv-icon/
 
 # Plugin build artifacts
 plugins/**/target/
