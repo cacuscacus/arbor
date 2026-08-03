@@ -1,0 +1,40 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Swift / Xcode
+apps/macos/build/
+apps/macos/DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+.DS_Store
+xcuserdata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Logs / caches
+*.log
+.cache/
+.arbor/
+
+# Plugin build artifacts
+plugins/**/target/

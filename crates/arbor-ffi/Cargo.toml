@@ -1,0 +1,16 @@
+[package]
+name = "arbor-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "C ABI bridge between Arbor core and native UIs (SwiftUI, …)"
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+arbor-core.workspace = true
+serde_json.workspace = true
