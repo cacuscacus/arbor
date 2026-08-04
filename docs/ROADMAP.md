@@ -195,7 +195,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
 - ✓ [v1.2.0](https://github.com/cacuscacus/arbor/releases/tag/v1.2.0) — Help → Release History from [`CHANGELOG.md`](../CHANGELOG.md)
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
-- ⬚ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
+- ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
 - ⬚ Linux / Windows release channels once Phase 7 UIs exist
 
@@ -207,9 +207,10 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.0.0 browser MVP
 ✓ v1.1.0 multi-window (New Window / Dock)
 ✓ v1.2.0 Help → Release History (CHANGELOG.md)
-  → next: tabs / split / “Open in New Window” / session restore (MVP window+tabs+split paths)
-  → Embedded terminal MVP (bottom pane + follow cwd) → agent runners → Quick diff / Git
-  → Automation & remotes → Linux UI → Windows UI
+✓ main (unreleased): Open in New Window, Check for Updates,
+  tabs, split view, session restore, embedded terminal
+  → next release candidate: v1.3.0 (after smoke test)
+  → agent runners → Quick diff / Git → remotes → Linux / Windows
 ```
 
-Phase 3 window basics, tabs, split view, and session restore MVP are in; Phase 2a embedded terminal MVP (SwiftTerm bottom pane) is in; richer per-window UI state (view mode / sort / sidebar width / terminal visibility in session) and agent runners follow.
+All six hybrid-branch slices are merged to `main`. **Do not cut a GitHub/Homebrew release until you smoke-test and confirm.** Remaining polish: richer session fields (view mode / sort / sidebar / terminal visibility), agent runners.
