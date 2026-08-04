@@ -164,7 +164,8 @@ struct ContentView: View {
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 4)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // Capsule → true horizontal pill (Finder tab strip), not a rounded rect.
+            .glassEffect(.regular, in: Capsule(style: .continuous))
             .padding(.horizontal, 10)
             .padding(.top, 4)
             .padding(.bottom, 2)
@@ -326,6 +327,10 @@ private struct SessionWindowFrameTracker: NSViewRepresentable {
 }
 
 /// Detail column for one tab: single browser or horizontal dual-pane split.
+///
+/// Window toolbar/title attach here (outside `HSplitView`) so Liquid Glass samples
+/// the full detail width. Putting `.toolbar` on a single pane child made the other
+/// half go opaque and drew a hard horizontal title separator (cases 3–4).
 private struct TabDetailView: View {
     @Bindable var tab: BrowserTab
     @Bindable var favorites: SidebarFavoritesStore
@@ -356,6 +361,7 @@ private struct TabDetailView: View {
                 )
             }
         }
+        .modifier(FocusedPaneWindowChromeModifier(isEnabled: isActive, tab: tab))
     }
 }
 
@@ -368,7 +374,7 @@ private struct PaneBrowserHost: View {
 
     var body: some View {
         FileBrowserView(
-            navigation: pane.navigation,
+            pane: pane,
             favorites: favorites,
             dragState: dragState,
             isActive: isActive,
@@ -381,6 +387,102 @@ private struct PaneBrowserHost: View {
                 tab.focusPane(pane.id)
             }
         )
+    }
+}
+
+/// Stable, full-width window chrome driven by the focused pane.
+private struct FocusedPaneWindowChromeModifier: ViewModifier {
+    var isEnabled: Bool
+    @Bindable var tab: BrowserTab
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            chromeBody(content: content)
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func chromeBody(content: Content) -> some View {
+        @Bindable var pane = tab.focusedPane
+        let navigation = pane.navigation
+        let title: String = {
+            let url = navigation.current
+            if url.path == "/" { return "Macintosh HD" }
+            let name = url.lastPathComponent
+            return name.isEmpty ? url.path : name
+        }()
+
+        content
+            .navigationTitle(title)
+            // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass.
+            .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    HStack(spacing: 2) {
+                        Button {
+                            pane.sendChrome(.back)
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                        }
+                        .disabled(!navigation.canGoBack)
+                        .help("Back")
+
+                        Button {
+                            pane.sendChrome(.forward)
+                        } label: {
+                            Image(systemName: "chevron.forward")
+                        }
+                        .disabled(!navigation.canGoForward)
+                        .help("Forward")
+                    }
+                }
+
+                ToolbarSpacer(.fixed)
+
+                ToolbarItemGroup(placement: .navigation) {
+                    HStack(spacing: 2) {
+                        Button {
+                            pane.sendChrome(.undo)
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        .disabled(!pane.undoStack.canUndo)
+                        .help(pane.undoStack.undoActionName)
+
+                        Button {
+                            pane.sendChrome(.redo)
+                        } label: {
+                            Image(systemName: "arrow.uturn.forward")
+                        }
+                        .disabled(!pane.undoStack.canRedo)
+                        .help(pane.undoStack.redoActionName)
+                    }
+                }
+
+                ToolbarSpacer(.flexible)
+
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Picker("View", selection: $pane.displaySettings.viewMode) {
+                        ForEach(BrowserViewMode.allCases) { mode in
+                            Image(systemName: mode.systemImage)
+                                .tag(mode)
+                                .help(mode.title)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 72)
+                    .help("List or icon view")
+
+                    Button {
+                        pane.sendChrome(.toggleSearch)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .help("Search")
+                }
+            }
     }
 }
 

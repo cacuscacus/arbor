@@ -2,13 +2,17 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FileBrowserView: View {
-    @Bindable var navigation: BrowserNavigation
+    @Bindable var pane: BrowserPane
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
     /// When multiple tab / split browsers stay mounted, only the focused pane publishes scene focus values.
     var isActive: Bool = true
     /// Opens a folder in the other split pane (creates a split if needed).
     var onOpenInSplit: ((URL) -> Void)? = nil
+
+    private var navigation: BrowserNavigation { pane.navigation }
+    private var displaySettings: BrowserDisplaySettings { pane.displaySettings }
+    private var undoStack: ArborUndoStack { pane.undoStack }
 
     @State private var entries: [FileEntry] = []
     @State private var selection = Set<URL>()
@@ -18,13 +22,11 @@ struct FileBrowserView: View {
     @State private var errorMessage: String?
     @State private var details: FileDetails?
     @State private var multiInfo: MultiSelectionInfo?
-    @State private var displaySettings = BrowserDisplaySettings()
     @State private var transferErrorTitle = "Transfer Failed"
     @State private var transferErrorMessage: String?
     @State private var createDialog: CreateItemDialog?
     @State private var newItemName = ""
     @State private var createErrorMessage: String?
-    @State private var undoStack = ArborUndoStack()
     @State private var undoErrorMessage: String?
     @State private var renamingURL: URL?
     @State private var renameDraft = ""
@@ -112,31 +114,17 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
-        .modifier(FileBrowserChromeModifier(
-            isActive: isActive,
-            navigationTitle: isSearchActive ? "Search" : path.lastPathComponent,
-            navigationButtons: { navigationButtons },
-            undoRedoButtons: { undoRedoButtons },
-            trailingToolbar: {
-                viewModePicker
-
-                Button {
-                    if isSearchPresented && !isSearchActive {
-                        dismissSearch()
-                    } else {
-                        presentSearch()
-                    }
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .help(showsSearchPanel ? "Hide Search" : "Show Search")
-            }
-        ))
+        // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
+        // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(
             isActive: isActive,
             displaySettings: displaySettings,
             folderURL: navigation.current
         ))
+        .onChange(of: pane.chromeCommandToken) { _, _ in
+            guard isActive, let command = pane.consumeChromeCommand() else { return }
+            handleChromeCommand(command)
+        }
         .onChange(of: navigation.current, initial: true) { _, url in
             guard isActive else { return }
             WindowLaunchCoordinator.noteFocusedFolder(url)
@@ -295,57 +283,23 @@ struct FileBrowserView: View {
         }
     }
 
-    private var navigationButtons: some View {
-        HStack(spacing: 2) {
-            Button {
-                goBack()
-            } label: {
-                Image(systemName: "chevron.backward")
-            }
-            .disabled(!navigation.canGoBack)
-            .help("Back")
-
-            Button {
-                goForward()
-            } label: {
-                Image(systemName: "chevron.forward")
-            }
-            .disabled(!navigation.canGoForward)
-            .help("Forward")
-        }
-    }
-
-    private var undoRedoButtons: some View {
-        HStack(spacing: 2) {
-            Button {
-                performUndo()
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-            }
-            .disabled(!undoStack.canUndo)
-            .help(undoStack.undoActionName)
-
-            Button {
-                performRedo()
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
-            }
-            .disabled(!undoStack.canRedo)
-            .help(undoStack.redoActionName)
-        }
-    }
-
-    private var viewModePicker: some View {
-        Picker("View", selection: $displaySettings.viewMode) {
-            ForEach(BrowserViewMode.allCases) { mode in
-                Image(systemName: mode.systemImage)
-                    .tag(mode)
-                    .help(mode.title)
+    private func handleChromeCommand(_ command: BrowserPaneChromeCommand) {
+        switch command {
+        case .back:
+            goBack()
+        case .forward:
+            goForward()
+        case .undo:
+            performUndo()
+        case .redo:
+            performRedo()
+        case .toggleSearch:
+            if isSearchPresented && !isSearchActive {
+                dismissSearch()
+            } else {
+                presentSearch()
             }
         }
-        .pickerStyle(.segmented)
-        .frame(width: 72)
-        .help("List or icon view")
     }
 
     @ViewBuilder
@@ -912,44 +866,6 @@ struct FileBrowserView: View {
         } catch {
             renameErrorMessage = error.localizedDescription
             // Stay in rename mode so the user can fix the name.
-        }
-    }
-}
-
-private struct FileBrowserChromeModifier<Nav: View, Undo: View, Trailing: View>: ViewModifier {
-    var isActive: Bool
-    var navigationTitle: String
-    @ViewBuilder var navigationButtons: () -> Nav
-    @ViewBuilder var undoRedoButtons: () -> Undo
-    @ViewBuilder var trailingToolbar: () -> Trailing
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if isActive {
-            content
-                .navigationTitle(navigationTitle)
-                // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass
-                // into a solid bar. Let the system glass toolbar float and group items.
-                .toolbar {
-                    ToolbarItemGroup(placement: .navigation) {
-                        navigationButtons()
-                    }
-
-                    ToolbarSpacer(.fixed)
-
-                    ToolbarItemGroup(placement: .navigation) {
-                        undoRedoButtons()
-                    }
-
-                    ToolbarSpacer(.flexible)
-
-                    // Finder places view mode next to search on the trailing side.
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        trailingToolbar()
-                    }
-                }
-        } else {
-            content
         }
     }
 }

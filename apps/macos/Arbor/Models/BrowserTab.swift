@@ -1,19 +1,46 @@
 import Foundation
 
+/// Commands the window toolbar sends into the focused pane’s `FileBrowserView`.
+enum BrowserPaneChromeCommand: Equatable {
+    case back
+    case forward
+    case undo
+    case redo
+    case toggleSearch
+}
+
 /// One folder pane inside a browser tab (primary, or a side of a split).
 @Observable
 final class BrowserPane: Identifiable {
     let id: UUID
     let navigation: BrowserNavigation
+    /// Per-pane display prefs (kept on the pane so split chrome can bind without hopping views).
+    var displaySettings = BrowserDisplaySettings()
+    /// Per-pane undo stack (same reason as `displaySettings`).
+    var undoStack = ArborUndoStack()
+
+    /// Bumped when the window toolbar wants the focused browser to run `pendingChromeCommand`.
+    private(set) var chromeCommandToken = 0
+    private(set) var pendingChromeCommand: BrowserPaneChromeCommand?
 
     init(id: UUID = UUID(), root: URL) {
         self.id = id
         navigation = BrowserNavigation(initial: root)
     }
+
+    func sendChrome(_ command: BrowserPaneChromeCommand) {
+        pendingChromeCommand = command
+        chromeCommandToken &+= 1
+    }
+
+    func consumeChromeCommand() -> BrowserPaneChromeCommand? {
+        defer { pendingChromeCommand = nil }
+        return pendingChromeCommand
+    }
 }
 
 /// One Finder-style browser tab: identity + one or two panes (optional horizontal split).
-/// Selection / display remain in `FileBrowserView` `@State` for v1; keep inactive
+/// Selection / search remain in `FileBrowserView` `@State` for v1; keep inactive
 /// tab views (and both split panes) mounted so that state is preserved across switches.
 @Observable
 final class BrowserTab: Identifiable {
