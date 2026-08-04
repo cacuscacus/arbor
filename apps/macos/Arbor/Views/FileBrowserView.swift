@@ -2,7 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FileBrowserView: View {
-    @Binding var path: URL
+    @Bindable var navigation: BrowserNavigation
+    @Bindable var favorites: SidebarFavoritesStore
+    var dragState: FileDragState
 
     @State private var entries: [FileEntry] = []
     @State private var selection = Set<URL>()
@@ -13,7 +15,6 @@ struct FileBrowserView: View {
     @State private var details: FileDetails?
     @State private var multiInfo: MultiSelectionInfo?
     @State private var displaySettings = BrowserDisplaySettings()
-    @State private var dragState = FileDragState()
     @State private var transferErrorTitle = "Transfer Failed"
     @State private var transferErrorMessage: String?
     @State private var createDialog: CreateItemDialog?
@@ -32,12 +33,19 @@ struct FileBrowserView: View {
     @State private var isSearching = false
     @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var isSearchPresented = false
 
     @FocusState private var listFocused: Bool
     @FocusState private var searchFocused: Bool
 
+    private var path: URL { navigation.current }
+
     private var isSearchActive: Bool {
         !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsSearchPanel: Bool {
+        isSearchPresented || isSearchActive
     }
 
     private var relativeRoot: URL {
@@ -75,40 +83,66 @@ struct FileBrowserView: View {
 
     private var browserScaffold: some View {
         VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    if showsSearchPanel {
+                        floatingSearchPanel
+                            .padding(.top, 10)
+                            .padding(.trailing, 12)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy(duration: 0.18), value: showsSearchPanel)
+
             if !isSearchActive {
+                Divider()
                 BreadcrumbBar(
                     path: path,
                     dragState: dragState,
                     onNavigate: { target in navigate(to: target) },
                     onTransfer: handleTransfer
                 )
-                Divider()
             }
-
-            content
         }
         .navigationTitle(isSearchActive ? "Search" : path.lastPathComponent)
+        // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass
+        // into a solid bar. Let the system glass toolbar float and group items.
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                undoRedoButtons
-                viewModePicker
-                columnMenu
+                navigationButtons
             }
+
+            ToolbarSpacer(.fixed)
+
+            ToolbarItemGroup(placement: .navigation) {
+                undoRedoButtons
+            }
+
+            ToolbarSpacer(.flexible)
+
+            // Finder places view mode next to search on the trailing side.
             ToolbarItemGroup(placement: .primaryAction) {
-                SearchBarView(
-                    query: $searchQuery,
-                    scope: $searchScope,
-                    isSearching: isSearching,
-                    resultCount: isSearchActive ? searchHits.count : nil,
-                    focus: $searchFocused
-                )
+                viewModePicker
+
+                Button {
+                    if isSearchPresented && !isSearchActive {
+                        dismissSearch()
+                    } else {
+                        presentSearch()
+                    }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .help(showsSearchPanel ? "Hide Search" : "Show Search")
             }
         }
+        .focusedSceneValue(\.browserDisplaySettings, displaySettings)
         .onAppear {
             reload()
             listFocused = true
         }
-        .onChange(of: path) { _, _ in
+        .onChange(of: navigation.current) { _, _ in
             cancelRename()
             selection = []
             if searchScope == .currentFolder, isSearchActive {
@@ -146,8 +180,8 @@ struct FileBrowserView: View {
                 cancelRename()
                 return .handled
             }
-            if isSearchActive || searchFocused {
-                clearSearch()
+            if isSearchActive || searchFocused || isSearchPresented {
+                dismissSearch()
                 return .handled
             }
             if !selection.isEmpty {
@@ -158,20 +192,46 @@ struct FileBrowserView: View {
         }
         .onKeyPress(keys: [.init("/")], phases: .down) { _ in
             if searchFocused { return .ignored }
-            searchFocused = true
+            presentSearch()
             return .handled
         }
         .onKeyPress(.return) {
             if renamingURL != nil { return .ignored }
             return openSelection()
         }
+        .onKeyPress(.delete) {
+            if renamingURL != nil || searchFocused { return .ignored }
+            return moveSelectionToTrash()
+        }
+        // Keep keyboard focus for shortcuts, but never draw the accent focus ring
+        // (it shows up as random light-blue lines, especially while resizing).
         .focusable()
         .focused($listFocused)
+        .focusEffectDisabled()
+    }
+
+    private var floatingSearchPanel: some View {
+        SearchBarView(
+            query: $searchQuery,
+            scope: $searchScope,
+            isSearching: isSearching,
+            resultCount: isSearchActive ? searchHits.count : nil,
+            focus: $searchFocused,
+            onDismiss: dismissSearch
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
     }
 
     private var shortcutButtons: some View {
         Group {
-            Button("") { searchFocused = true }
+            Button("") { presentSearch() }
                 .keyboardShortcut("f", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
@@ -195,6 +255,41 @@ struct FileBrowserView: View {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .opacity(0)
                 .allowsHitTesting(false)
+
+            Button("") { goBack() }
+                .keyboardShortcut("[", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+
+            Button("") { goForward() }
+                .keyboardShortcut("]", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+
+            Button("") { _ = moveSelectionToTrash() }
+                .keyboardShortcut(.delete, modifiers: [])
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var navigationButtons: some View {
+        HStack(spacing: 2) {
+            Button {
+                goBack()
+            } label: {
+                Image(systemName: "chevron.backward")
+            }
+            .disabled(!navigation.canGoBack)
+            .help("Back")
+
+            Button {
+                goForward()
+            } label: {
+                Image(systemName: "chevron.forward")
+            }
+            .disabled(!navigation.canGoForward)
+            .help("Forward")
         }
     }
 
@@ -229,21 +324,6 @@ struct FileBrowserView: View {
         .pickerStyle(.segmented)
         .frame(width: 72)
         .help("List or icon view")
-    }
-
-    private var columnMenu: some View {
-        Menu {
-            ForEach(BrowserColumn.configurable) { column in
-                if let binding = displaySettings.binding(for: column) {
-                    Toggle(column.title, isOn: binding)
-                }
-            }
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-        }
-        .disabled(displaySettings.viewMode != .list)
-        .help("Visible columns")
-        .opacity(displaySettings.viewMode == .list ? 1 : 0.35)
     }
 
     @ViewBuilder
@@ -324,6 +404,7 @@ struct FileBrowserView: View {
                 selection: $selection,
                 renamingURL: $renamingURL,
                 renameDraft: $renameDraft,
+                iconMetrics: displaySettings.iconMetrics,
                 dragState: dragState,
                 onOpen: { entry in
                     cancelRename()
@@ -391,6 +472,17 @@ struct FileBrowserView: View {
             }
         }
 
+        let folderTargets = targets.filter(\.isBrowsable)
+        if !folderTargets.isEmpty {
+            let toAdd = folderTargets.filter { !favorites.contains($0.id) }
+            if !toAdd.isEmpty {
+                Button(toAdd.count == 1 ? "Add to Favorites" : "Add to Favorites (\(toAdd.count))") {
+                    commitContextSelection(anchor: anchor)
+                    favorites.add(urls: toAdd.map(\.id))
+                }
+            }
+        }
+
         Divider()
 
         Button(targets.count > 1 ? "Copy Paths" : "Copy Path") {
@@ -416,6 +508,13 @@ struct FileBrowserView: View {
         Button(targets.count > 1 ? "Get Info (\(targets.count))…" : "Get Info…") {
             commitContextSelection(anchor: anchor)
             showInfo(for: previewTargets(for: anchor))
+        }
+
+        Divider()
+
+        Button("Move to Trash", role: .destructive) {
+            commitContextSelection(anchor: anchor)
+            trashEntries(previewTargets(for: anchor))
         }
     }
 
@@ -490,6 +589,19 @@ struct FileBrowserView: View {
         reload()
     }
 
+    private func presentSearch() {
+        isSearchPresented = true
+        DispatchQueue.main.async {
+            searchFocused = true
+        }
+    }
+
+    private func dismissSearch() {
+        clearSearch()
+        isSearchPresented = false
+        listFocused = true
+    }
+
     private func reload() {
         do {
             entries = try LocalFileService.list(path: path)
@@ -513,7 +625,15 @@ struct FileBrowserView: View {
     }
 
     private func navigate(to url: URL) {
-        path = url.standardizedFileURL
+        navigation.go(to: url)
+    }
+
+    private func goBack() {
+        navigation.goBack()
+    }
+
+    private func goForward() {
+        navigation.goForward()
     }
 
     private func goToParent() {
@@ -666,8 +786,42 @@ struct FileBrowserView: View {
         selection = newSelection
     }
 
-    // MARK: - Rename
+    // MARK: - Trash
 
+    @discardableResult
+    private func moveSelectionToTrash() -> KeyPress.Result {
+        let targets = visibleEntries.filter { selection.contains($0.id) }
+        guard !targets.isEmpty else { return .ignored }
+        trashEntries(targets)
+        return .handled
+    }
+
+    private func trashEntries(_ entries: [FileEntry]) {
+        guard !entries.isEmpty else { return }
+        cancelRename()
+        let result = FileOperations.trash(entries.map(\.id))
+
+        if !result.failed.isEmpty {
+            let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
+            transferErrorTitle = "Move to Trash Failed"
+            transferErrorMessage = result.trashed.isEmpty
+                ? "Could not move to Trash: \(names)"
+                : "Some items could not be moved to Trash: \(names)"
+        }
+
+        if !result.trashed.isEmpty {
+            undoStack.register(.trash(result.trashed))
+        }
+
+        if isSearchActive {
+            scheduleSearch()
+        } else {
+            reload()
+        }
+        selection = []
+    }
+
+    // MARK: - Rename
     private func handleNameClick(_ entry: FileEntry) {
         if renamingURL == entry.id { return }
 
@@ -845,8 +999,17 @@ struct BreadcrumbBar: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    Button(crumb.name) {
+                    Button {
                         onNavigate(crumb.url)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(nsImage: FileIcon.image(for: crumb.url, size: 14))
+                                .resizable()
+                                .interpolation(.high)
+                                .frame(width: 14, height: 14)
+                            Text(crumb.name)
+                                .lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
                     .font(.caption)
@@ -866,10 +1029,11 @@ struct BreadcrumbBar: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.bar)
+        .focusEffectDisabled()
     }
 }
 

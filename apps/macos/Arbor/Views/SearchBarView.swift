@@ -6,6 +6,7 @@ struct SearchBarView: View {
     var isSearching: Bool
     var resultCount: Int?
     var focus: FocusState<Bool>.Binding
+    var onDismiss: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -17,7 +18,7 @@ struct SearchBarView: View {
                 TextField(placeholder, text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .frame(minWidth: 140, idealWidth: 200, maxWidth: 260)
+                    .frame(minWidth: 160, idealWidth: 220, maxWidth: 280)
                     .focused(focus)
 
                 if isSearching {
@@ -43,6 +44,7 @@ struct SearchBarView: View {
                 Text("Folder").tag(SearchScope.currentFolder)
                 Text("Global").tag(SearchScope.global)
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
             .frame(width: 140)
             .help("Search scope")
@@ -53,7 +55,21 @@ struct SearchBarView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+
+            if let onDismiss {
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close search")
+            }
         }
+        .padding(.leading, 4)
+        .padding(.trailing, 2)
     }
 
     private var placeholder: String {

@@ -193,6 +193,32 @@ enum FileOperations {
         return (source, destination)
     }
 
+    struct TrashResult {
+        /// Original location → location inside Trash (for undo).
+        var trashed: [(from: URL, trashURL: URL)] = []
+        var failed: [(URL, Error)] = []
+    }
+
+    /// Moves items into the Trash. Returns trash URLs when available so Undo can restore them.
+    static func trash(_ sources: [URL]) -> TrashResult {
+        var result = TrashResult()
+        let fm = FileManager.default
+        let unique = Array(Set(sources.map { $0.standardizedFileURL }))
+
+        for source in unique {
+            do {
+                var resulting: NSURL?
+                try fm.trashItem(at: source, resultingItemURL: &resulting)
+                let trashURL = (resulting as URL?) ?? source
+                result.trashed.append((from: source, trashURL: trashURL.standardizedFileURL))
+            } catch {
+                result.failed.append((source, error))
+            }
+        }
+
+        return result
+    }
+
     private static func uniqueDestination(
         in directory: URL,
         preferredName: String,

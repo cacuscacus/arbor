@@ -11,6 +11,8 @@ enum ArborUndoCommand: Equatable {
     case create(url: URL, isDirectory: Bool)
     /// Item was renamed from → to. Undo/redo renames back and forth.
     case rename(from: URL, to: URL)
+    /// Items were moved to Trash (`from` → `trashURL`). Undo restores from Trash when still present.
+    case trash([(from: URL, trashURL: URL)])
 
     var actionName: String {
         switch self {
@@ -18,6 +20,7 @@ enum ArborUndoCommand: Equatable {
         case .copy: return "Copy"
         case .create: return "Create"
         case .rename: return "Rename"
+        case .trash: return "Move to Trash"
         }
     }
 
@@ -33,6 +36,9 @@ enum ArborUndoCommand: Equatable {
             return a == b && ad == bd
         case (.rename(let aFrom, let aTo), .rename(let bFrom, let bTo)):
             return aFrom == bFrom && aTo == bTo
+        case (.trash(let a), .trash(let b)):
+            guard a.count == b.count else { return false }
+            return zip(a, b).allSatisfy { $0.from == $1.from && $0.trashURL == $1.trashURL }
         default:
             return false
         }
@@ -42,6 +48,8 @@ enum ArborUndoCommand: Equatable {
 struct ArborUndoApplyResult {
     var restoredSelection: Set<URL> = []
     var errorMessage: String?
+    /// When redo/apply of `.trash` produces new trash URLs, the updated command to push undo.
+    var rewrittenCommand: ArborUndoCommand?
 }
 
 @Observable
@@ -64,6 +72,8 @@ final class ArborUndoStack {
         switch command {
         case .move(let pairs), .copy(let pairs):
             guard !pairs.isEmpty else { return }
+        case .trash(let pairs):
+            guard !pairs.isEmpty else { return }
         case .create, .rename:
             break
         }
@@ -77,8 +87,8 @@ final class ArborUndoStack {
             return ArborUndoApplyResult()
         }
         let result = invert(command)
-        if result.errorMessage == nil {
-            // For create, keep the original path/kind so redo can recreate it.
+        if result.errorMessage == nil || !result.restoredSelection.isEmpty {
+            // Partial restores still consume the undo entry so we don't double-apply.
             redoCommands.append(command)
         } else {
             undoCommands.append(command)
@@ -92,9 +102,13 @@ final class ArborUndoStack {
             return ArborUndoApplyResult()
         }
         let result = apply(command)
-        if result.errorMessage == nil {
-            // If create was recreated at a different unique path, register that.
-            if case .create = command, let newURL = result.restoredSelection.first {
+        if result.errorMessage == nil
+            || result.rewrittenCommand != nil
+            || !result.restoredSelection.isEmpty
+        {
+            if let rewritten = result.rewrittenCommand {
+                undoCommands.append(rewritten)
+            } else if case .create = command, let newURL = result.restoredSelection.first {
                 let isDirectory: Bool
                 if case .create(_, let dir) = command {
                     isDirectory = dir
@@ -129,6 +143,23 @@ final class ArborUndoStack {
             return recreate(at: url, isDirectory: isDirectory)
         case .rename(let from, let to):
             return transferPairs([(from: from, to: to)], operation: .move)
+        case .trash(let pairs):
+            // After undo, items are back at `from`. Trash them again and remember new trash URLs.
+            let result = FileOperations.trash(pairs.map(\.from))
+            var applyResult = ArborUndoApplyResult(
+                restoredSelection: Set(result.trashed.map(\.from))
+            )
+            if !result.failed.isEmpty {
+                let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
+                applyResult.errorMessage = result.trashed.isEmpty
+                    ? "Could not move to Trash: \(names)"
+                    : "Some items could not be moved to Trash: \(names)"
+            }
+            if !result.trashed.isEmpty {
+                applyResult.rewrittenCommand = .trash(result.trashed)
+                applyResult.restoredSelection = []
+            }
+            return applyResult
         }
     }
 
@@ -143,6 +174,22 @@ final class ArborUndoStack {
             return trashURLs([url])
         case .rename(let from, let to):
             return transferPairs([(from: to, to: from)], operation: .move)
+        case .trash(let pairs):
+            // Restore from Trash → original locations (if still in Trash).
+            let reversed = pairs.map { (from: $0.trashURL, to: $0.from) }
+            var result = transferPairs(reversed, operation: .move)
+            if result.restoredSelection.isEmpty, result.errorMessage == nil {
+                result.errorMessage = "Items are no longer in the Trash."
+            } else if result.restoredSelection.count < pairs.count {
+                let missing = pairs.count - result.restoredSelection.count
+                let note = "\(missing) item\(missing == 1 ? "" : "s") could not be restored from Trash."
+                if let existing = result.errorMessage {
+                    result.errorMessage = existing + "\n" + note
+                } else {
+                    result.errorMessage = note
+                }
+            }
+            return result
         }
     }
 
@@ -192,6 +239,11 @@ final class ArborUndoStack {
             let destinationParent = destination.deletingLastPathComponent()
 
             do {
+                guard fm.fileExists(atPath: source.path) else {
+                    failures.append("\(source.lastPathComponent): no longer exists")
+                    continue
+                }
+
                 var isDir: ObjCBool = false
                 if !fm.fileExists(atPath: destinationParent.path, isDirectory: &isDir) || !isDir.boolValue {
                     try fm.createDirectory(at: destinationParent, withIntermediateDirectories: true)
