@@ -144,13 +144,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         File::create(dir.path().join(".secret")).unwrap();
 
-        let entries = list_dir(
-            dir.path(),
-            ListOptions {
-                show_hidden: true,
-            },
-        )
-        .unwrap();
+        let entries = list_dir(dir.path(), ListOptions { show_hidden: true }).unwrap();
 
         assert!(entries.iter().any(|e| e.name == ".secret"));
     }
@@ -159,5 +153,44 @@ mod tests {
     fn missing_path_returns_not_found() {
         let err = list_dir("/nonexistent/arbor/path", ListOptions::default()).unwrap_err();
         assert!(matches!(err, ArborError::NotFound(_)));
+    }
+
+    #[test]
+    fn file_path_returns_not_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-dir.txt");
+        File::create(&file).unwrap();
+
+        let err = list_dir(&file, ListOptions::default()).unwrap_err();
+        assert!(matches!(err, ArborError::NotADirectory(_)));
+    }
+
+    #[test]
+    fn sorts_case_insensitively_within_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        File::create(dir.path().join("Zed.txt")).unwrap();
+        File::create(dir.path().join("alpha.txt")).unwrap();
+        fs::create_dir(dir.path().join("Beta")).unwrap();
+        fs::create_dir(dir.path().join("aardvark")).unwrap();
+
+        let entries = list_dir(dir.path(), ListOptions::default()).unwrap();
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+
+        assert_eq!(names, vec!["aardvark", "Beta", "alpha.txt", "Zed.txt"]);
+    }
+
+    #[test]
+    fn marks_hidden_and_reports_file_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".notes");
+        std::fs::write(&path, b"hello").unwrap();
+
+        let entries = list_dir(dir.path(), ListOptions { show_hidden: true }).unwrap();
+        let entry = entries.iter().find(|e| e.name == ".notes").unwrap();
+
+        assert!(entry.hidden);
+        assert_eq!(entry.kind, EntryKind::File);
+        assert_eq!(entry.size, 5);
+        assert!(entry.path.ends_with(".notes"));
     }
 }

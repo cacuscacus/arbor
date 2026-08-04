@@ -8,7 +8,7 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
 
-use arbor_core::fs::{ListOptions, list_dir};
+use arbor_core::fs::{list_dir, ListOptions};
 
 /// Library version as a null-terminated C string.
 #[no_mangle]
@@ -60,4 +60,48 @@ pub unsafe extern "C" fn arbor_string_free(s: *mut c_char) {
         return;
     }
     drop(unsafe { CString::from_raw(s) });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::fs::File;
+
+    #[test]
+    fn version_is_non_empty_c_string() {
+        let ptr = arbor_version();
+        assert!(!ptr.is_null());
+        let version = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn list_dir_null_path_returns_null() {
+        let ptr = unsafe { arbor_list_dir(ptr::null()) };
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn list_dir_returns_json_and_free_is_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        File::create(dir.path().join("a.txt")).unwrap();
+
+        let c_path = CString::new(dir.path().to_str().unwrap()).unwrap();
+        let ptr = unsafe { arbor_list_dir(c_path.as_ptr()) };
+        assert!(!ptr.is_null());
+
+        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
+        assert!(json.contains("a.txt"));
+
+        unsafe { arbor_string_free(ptr) };
+        unsafe { arbor_string_free(ptr::null_mut()) };
+    }
+
+    #[test]
+    fn list_dir_missing_path_returns_null() {
+        let c_path = CString::new("/nonexistent/arbor/ffi/path").unwrap();
+        let ptr = unsafe { arbor_list_dir(c_path.as_ptr()) };
+        assert!(ptr.is_null());
+    }
 }

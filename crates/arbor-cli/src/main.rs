@@ -5,10 +5,14 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use arbor_core::fs::{ListOptions, list_dir};
+use arbor_core::fs::{list_dir, ListOptions};
 
 #[derive(Parser)]
-#[command(name = "arbor", version, about = "Arbor — modern file manager for developers")]
+#[command(
+    name = "arbor",
+    version,
+    about = "Arbor — modern file manager for developers"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -43,13 +47,8 @@ fn main() -> Result<()> {
             println!("arbor {}", arbor_core::VERSION);
         }
         Commands::List { path, all, json } => {
-            let entries = list_dir(
-                &path,
-                ListOptions {
-                    show_hidden: all,
-                },
-            )
-            .with_context(|| format!("failed to list {}", path.display()))?;
+            let entries = list_dir(&path, ListOptions { show_hidden: all })
+                .with_context(|| format!("failed to list {}", path.display()))?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&entries)?);

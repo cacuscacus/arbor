@@ -18,7 +18,7 @@ pub mod terminal;
 pub mod watcher;
 
 pub use error::{ArborError, Result};
-pub use fs::{DirectoryEntry, EntryKind, list_dir};
+pub use fs::{list_dir, DirectoryEntry, EntryKind};
 
 /// Library version embedded at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -48,6 +48,8 @@ apps/macos/
 
 App Sandbox is **off** for local development so the file manager can read the filesystem.
 
+Before PRs, run `./scripts/dev-check.sh` from the repo root (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). Rust / CLI tests run in GitHub Actions; SwiftUI still needs a manual smoke check in Xcode.
+
 ## Build from terminal
 
 ```bash

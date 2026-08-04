@@ -2,4 +2,4 @@
 
 mod listing;
 
-pub use listing::{DirectoryEntry, EntryKind, ListOptions, list_dir};
+pub use listing::{list_dir, DirectoryEntry, EntryKind, ListOptions};

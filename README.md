@@ -6,11 +6,27 @@ Finder for everyone else. **Arbor** for people who actually work with files.
 
 ---
 
+## Install (macOS)
+
+Apple silicon, **macOS 26 (Tahoe)+**. No Apple notarization — prefer Homebrew:
+
+```bash
+brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
+brew trust cacuscacus/arbor   # required on Homebrew 6+
+brew install --cask arbor
+```
+
+Direct downloads: [GitHub Releases](https://github.com/cacuscacus/arbor/releases). First launch may need Finder → right-click → **Open**.
+
+Maintainer release process: [docs/RELEASES.md](docs/RELEASES.md).
+
+---
+
 ## Vision
 
-Modern operating systems still ship with file explorers designed primarily for casual users. Finder, Explorer, and most Linux file managers prioritize simplicity over discoverability, search performance, developer workflows, automation, and extensibility.
+Modern OS file explorers prioritize casual browsing over discoverability, search performance, developer workflows, automation, and extensibility.
 
-Arbor aims to become the filesystem equivalent of VS Code:
+Arbor aims to be the filesystem equivalent of VS Code:
 
 - **Fast** — instant startup, Everything-class search
 - **Native** — SwiftUI on macOS first; Tauri later for Linux and Windows
@@ -18,10 +34,6 @@ Arbor aims to become the filesystem equivalent of VS Code:
 - **AI-first** — natural language that translates into real shell commands
 - **Cross-platform** — one Rust core, multiple UIs
 - **Open source** — Apache-2.0
-
-Instead of merely browsing folders, Arbor becomes the control center for everything that happens around files: search, Git, terminals, automation, and AI — without jumping between Finder, Terminal, and your IDE.
-
-The filesystem barely evolved for decades. We still navigate folders like in the 1990s. Arbor treats the filesystem as a knowledge base — semantic search, Git, terminals, automation, and AI are first-class from day one.
 
 ---
 
@@ -70,72 +82,65 @@ UI (SwiftUI / Tauri)
 
 ```
 arbor/
-├── apps/
-│   └── macos/          # SwiftUI shell
+├── apps/macos/         # SwiftUI shell
 ├── crates/
-│   ├── arbor-core/     # Core library
-│   ├── arbor-ffi/      # FFI bridge
-│   └── arbor-cli/      # CLI binary
-├── docs/               # Architecture, roadmap, vision
-└── scripts/            # Dev helpers
+│   ├── arbor-core/     # Core library (+ unit tests)
+│   ├── arbor-ffi/      # FFI bridge (+ unit tests)
+│   └── arbor-cli/      # CLI (+ integration tests)
+├── Casks/              # Homebrew cask
+├── docs/               # Architecture, roadmap, releases, vision
+├── scripts/            # dev-check, packaging
+└── .github/workflows/  # CI
 ```
 
 ---
 
 ## Status
 
-**Early scaffolding.** Local development only — no public remote yet.
+**Public MVP on macOS.** v1.0.0 ships a Finder-like browser (list/icon views, search, DnD, undo) via Homebrew / GitHub Releases. The UI still talks to the filesystem directly in places; Rust `arbor-core` / FFI ownership is the next hardening step.
 
 ### Near-term focus
 
-1. Directory listing + keyboard navigation (SwiftUI)
-2. Instant filename search (`fd` / `walkdir` + optional SQLite)
+1. Grow `arbor-core` + FFI coverage; thin the SwiftUI layer
+2. Richer search (`fd` / walk + query language)
 3. Embedded terminal per folder
-4. FFI bridge so the UI talks to Rust, not the other way around
+4. In-app **Check for Updates…** via GitHub Releases API
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
+See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
-## Getting Started
+## Getting Started (development)
 
 ### Prerequisites
 
-- Rust 1.75+ (`rustup`)
-- Xcode 26+ (macOS UI)
-- macOS 26 (Tahoe)+ for the shipped app (Apple silicon)
+- Rust 1.75+ (`rustup`), with `rustfmt` and `clippy`
+- Xcode 26+ and macOS 26+ for the SwiftUI app
 
-### Build the Rust workspace
+### Build & test
 
 ```bash
 cargo build
-cargo test
-cargo run -p arbor-cli -- --help
+cargo test --workspace
+cargo run -p arbor-cli -- list .
+./scripts/dev-check.sh          # required before PRs (matches CI)
 ```
 
 ### macOS UI
 
-The SwiftUI app lives under `apps/macos/`. Open `apps/macos/Arbor.xcodeproj` in Xcode, or:
-
 ```bash
+open apps/macos/Arbor.xcodeproj
+# or package a Release ZIP:
 ./scripts/package-macos.sh
 ```
 
+More app notes: [apps/macos/README.md](apps/macos/README.md).
+
 ---
 
-## Install & releases
+## Contributing
 
-Preferred on macOS (Apple silicon, macOS 26+):
-
-```bash
-brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
-brew trust cacuscacus/arbor   # required on Homebrew 6+
-brew install --cask arbor
-```
-
-Direct downloads: [GitHub Releases](https://github.com/cacuscacus/arbor/releases). There is **no** Apple notarization — first launch may require Finder → right-click → **Open**. A lightweight in-app **Check for Updates…** (GitHub API, not Sparkle) is planned.
-
-Maintainer process: [docs/RELEASES.md](docs/RELEASES.md).
+Please read [CONTRIBUTING.md](CONTRIBUTING.md). Every PR must pass `./scripts/dev-check.sh` / GitHub Actions CI.
 
 ---
 
