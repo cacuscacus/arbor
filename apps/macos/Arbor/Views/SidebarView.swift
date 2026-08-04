@@ -220,6 +220,9 @@ struct SidebarView: View {
             delegate: makeDropDelegate(insertIndex: dropIndex)
         )
         .contextMenu {
+            Button("Open in New Window") {
+                WindowLaunchCoordinator.openNewWindow(cloning: item.url)
+            }
             Button("Remove from Favorites", role: .destructive) {
                 withAnimation(listSpring) {
                     favorites.remove(id: item.id)

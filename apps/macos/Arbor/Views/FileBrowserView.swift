@@ -463,6 +463,13 @@ struct FileBrowserView: View {
             openTargets(previewTargets(for: anchor), fromDoubleClick: false)
         }
 
+        if targets.count == 1, let only = targets.first, only.isBrowsable {
+            Button("Open in New Window") {
+                commitContextSelection(anchor: anchor)
+                WindowLaunchCoordinator.openNewWindow(cloning: only.id)
+            }
+        }
+
         if isSearchActive, targets.count == 1, let only = targets.first, !only.isBrowsable {
             Button("Show Enclosing Folder") {
                 commitContextSelection(anchor: anchor)
