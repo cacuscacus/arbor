@@ -2,13 +2,16 @@ import SwiftUI
 
 @main
 struct ArborApp: App {
+    @NSApplicationDelegateAdaptor(ArborAppDelegate.self) private var appDelegate
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "browser") {
             ContentView()
+                .background(WindowOpenInstaller())
         }
         // Default toolbar style — `.unified` fights Tahoe Liquid Glass floating pills.
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            NewWindowCommands()
             CommandGroup(replacing: .appInfo) {
                 Button("About Arbor") {
                     AboutWindowController.shared.show()
@@ -19,6 +22,34 @@ struct ArborApp: App {
             }
         }
         .defaultSize(width: 1100, height: 700)
+    }
+}
+
+/// Installs `openWindow` for Dock reopen after the last window closes.
+private struct WindowOpenInstaller: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                WindowLaunchCoordinator.install(openWindow: openWindow)
+            }
+    }
+}
+
+/// File → New Window (⌘N); also powers Dock “New Window” via the standard New menu item.
+private struct NewWindowCommands: Commands {
+    @FocusedValue(\.browserFolderURL) private var browserFolderURL
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Window") {
+                WindowLaunchCoordinator.openNewWindow(cloning: browserFolderURL)
+            }
+            .keyboardShortcut("n", modifiers: .command)
+        }
     }
 }
 

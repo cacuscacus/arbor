@@ -77,18 +77,39 @@ Related later work in Phase 4 (NL → Arbor-native actions) complements this; Ph
 
 ---
 
-## Phase 3 — Multi-window & session persistence
+## Phase 3 — Multi-window, tabs, split view & session persistence
 
-Goal: Arbor feels like a real desktop app across restarts and crashes.
+Goal: Arbor feels like a real desktop app across restarts and crashes — Finder-class windowing.
 
-- ⬚ Multiple independent windows (each with its own path, selection, view mode, terminal/agent pane state)
-- ⬚ Open window / New window from current folder; drag folder to Dock / reopen behavior as platform allows
+### Windows
+
+- ◐ **New Window** from File menu (⌘N) and Dock icon menu; clones the frontmost folder when possible (macOS)
+- ◐ Independent windows (separate navigation / selection / view state; shared favorites)
+- ⬚ Open window from a selected folder (“Open in New Window”)
 - ⬚ Persist per-window: frame (position/size/screen), sidebar width, view mode, sort, cwd, optional terminal visibility
 - ⬚ Persist global: favorites, tool presets, default agent, appearance
 - ⬚ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
 - ⬚ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
 
-Implementation note: macOS first (SwiftUI `WindowGroup` + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
+### Tabs (planned)
+
+Finder-style tabs inside a window so one frame can host multiple folders:
+
+- ⬚ Tab bar with open / close / reorder; ⌘T new tab, ⌘W close tab (window when last tab)
+- ⬚ Each tab owns its own navigation stack, selection, and view mode
+- ⬚ Drag folder onto tab bar / “Open in New Tab”
+- ⬚ Optional: merge all windows into tabs / move tab to new window
+
+### Split view (planned)
+
+Two (later more) folder panes in one window for side-by-side browsing:
+
+- ⬚ Horizontal split (primary); vertical split as follow-up
+- ⬚ Each pane has its own cwd, selection, and history
+- ⬚ Drag-and-drop between panes (copy/move with same semantics as between windows)
+- ⬚ “Open in Split” from selection or tab
+
+Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
 
 ---
 
@@ -173,8 +194,8 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ## Milestone sketch (ordering)
 
 ```text
-macOS core polish → Terminal + agent runners → Multi-window sessions
+macOS core polish → Multi-window / tabs / split → Terminal + agent runners
         → Quick diff / Git → Automation & remotes → Linux UI → Windows UI
 ```
 
-Agent runners and multi-window persistence are high leverage on macOS before investing in second/third native shells.
+Multi-window New Window is the first slice of Phase 3; tabs and split view follow before heavy terminal work if windowing UX is the bottleneck.

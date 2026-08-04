@@ -2,10 +2,15 @@ import SwiftUI
 
 /// Root layout: sidebar + file browser. Wired to Rust via FFI in a later pass.
 struct ContentView: View {
-    @State private var navigation = BrowserNavigation()
-    @State private var favorites = SidebarFavoritesStore()
+    @State private var navigation: BrowserNavigation
+    @State private var favorites = SidebarFavoritesStore.shared
     @State private var dragState = FileDragState()
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+
+    init(rootDirectory: URL? = nil) {
+        let root = rootDirectory ?? WindowLaunchCoordinator.dequeueRoot()
+        _navigation = State(initialValue: BrowserNavigation(initial: root))
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -30,5 +35,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(rootDirectory: FileManager.default.homeDirectoryForCurrentUser)
 }

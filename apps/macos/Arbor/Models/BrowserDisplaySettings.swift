@@ -274,4 +274,13 @@ extension FocusedValues {
         get { self[BrowserDisplaySettingsFocusedKey.self] }
         set { self[BrowserDisplaySettingsFocusedKey.self] = newValue }
     }
+
+    var browserFolderURL: URL? {
+        get { self[BrowserFolderURLFocusedKey.self] }
+        set { self[BrowserFolderURLFocusedKey.self] = newValue }
+    }
+}
+
+private struct BrowserFolderURLFocusedKey: FocusedValueKey {
+    typealias Value = URL
 }

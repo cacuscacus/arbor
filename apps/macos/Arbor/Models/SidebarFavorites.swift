@@ -44,6 +44,9 @@ struct FavoriteItem: Identifiable, Codable, Equatable, Hashable {
 
 @Observable
 final class SidebarFavoritesStore {
+    /// Shared across windows so favorites stay in sync (Finder-like).
+    static let shared = SidebarFavoritesStore()
+
     private(set) var items: [FavoriteItem]
 
     init() {
