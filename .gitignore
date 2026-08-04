@@ -49,3 +49,6 @@ Thumbs.db
 
 # Plugin build artifacts
 plugins/**/target/
+
+# Release packaging output
+/dist/

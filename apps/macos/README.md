@@ -53,3 +53,22 @@ App Sandbox is **off** for local development so the file manager can read the fi
 ```bash
 xcodebuild -project apps/macos/Arbor.xcodeproj -scheme Arbor -configuration Debug build
 ```
+
+## Releases & updates
+
+Shipping and update policy (GitHub Releases, Homebrew tap, planned **Check for Updates…** — no Sparkle / no Apple notarization): [`docs/RELEASES.md`](../../docs/RELEASES.md).
+
+Package a Release ZIP:
+
+```bash
+./scripts/package-macos.sh
+```
+
+Install from this repo’s cask (after a GitHub Release exists):
+
+```bash
+brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
+brew install --cask arbor
+```
+
+Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires macOS 26 (Tahoe)+.**

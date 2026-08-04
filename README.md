@@ -102,8 +102,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
 ### Prerequisites
 
 - Rust 1.75+ (`rustup`)
-- Xcode 15+ (macOS UI)
-- macOS 14+ recommended
+- Xcode 26+ (macOS UI)
+- macOS 26 (Tahoe)+ for the shipped app (Apple silicon)
 
 ### Build the Rust workspace
 
@@ -115,7 +115,26 @@ cargo run -p arbor-cli -- --help
 
 ### macOS UI
 
-The SwiftUI app lives under `apps/macos/`. Open it in Xcode once the project is generated, or follow docs as they land.
+The SwiftUI app lives under `apps/macos/`. Open `apps/macos/Arbor.xcodeproj` in Xcode, or:
+
+```bash
+./scripts/package-macos.sh
+```
+
+---
+
+## Install & releases
+
+Preferred on macOS (Apple silicon, macOS 26+):
+
+```bash
+brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
+brew install --cask arbor
+```
+
+Direct downloads: [GitHub Releases](https://github.com/cacuscacus/arbor/releases). There is **no** Apple notarization — first launch may require Finder → right-click → **Open**. A lightweight in-app **Check for Updates…** (GitHub API, not Sparkle) is planned.
+
+Maintainer process: [docs/RELEASES.md](docs/RELEASES.md).
 
 ---
 

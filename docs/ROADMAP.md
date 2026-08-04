@@ -52,7 +52,18 @@ Status legend: ⬚ planned · ◐ in progress · ✓ done
 - ⬚ Tauri UI for Linux / Windows
 - ⬚ Rust plugin ABI
 - ⬚ Lua / Python / JS scripting hosts
-- ⬚ Public release + remote repository
+- ✓ Public GitHub repository ([cacuscacus/arbor](https://github.com/cacuscacus/arbor))
+
+## Distribution & updates
+
+No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
+
+- ✓ Release process docs (`docs/RELEASES.md`)
+- ✓ macOS packaging script (`scripts/package-macos.sh`)
+- ✓ Homebrew cask in-repo (`Casks/arbor.rb`)
+- ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
+- ⬚ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
+- ⬚ Broader macOS deployment target (v1.0.0 requires macOS 26 / Tahoe APIs)
 
 ---
 
