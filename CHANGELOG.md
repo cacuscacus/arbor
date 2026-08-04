@@ -13,6 +13,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ### Added
 
+- Finder-style **tabs** in a window: tab bar, ⌘T new tab (clones current folder), ⌘W closes tab (closes window on last tab); inactive tab browsers stay mounted so selection and view state are preserved
 - Help → **Check for Updates…** compares the installed version to the latest GitHub Release (open release page / copy `brew upgrade --cask arbor`)
 - Context menu **Open in New Window** for a selected folder (browser and Favorites sidebar)
 

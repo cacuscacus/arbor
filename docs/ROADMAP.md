@@ -96,12 +96,12 @@ Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0)
 - ⬚ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
 - ⬚ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
 
-### Tabs (planned)
+### Tabs
 
 Finder-style tabs inside a window so one frame can host multiple folders:
 
-- ⬚ Tab bar with open / close / reorder; ⌘T new tab, ⌘W close tab (window when last tab)
-- ⬚ Each tab owns its own navigation stack, selection, and view mode
+- ◐ Tab bar with open / close; ⌘T new tab, ⌘W close tab (window when last tab) — reorder still planned
+- ◐ Each tab owns its own navigation stack; selection and view mode preserved while switching (inactive browsers stay mounted)
 - ⬚ Drag folder onto tab bar / “Open in New Tab”
 - ⬚ Optional: merge all windows into tabs / move tab to new window
 

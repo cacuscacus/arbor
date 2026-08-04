@@ -5,6 +5,8 @@ struct FileBrowserView: View {
     @Bindable var navigation: BrowserNavigation
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
+    /// When multiple tab browsers stay mounted, only the selected tab publishes scene focus values.
+    var isActive: Bool = true
 
     @State private var entries: [FileEntry] = []
     @State private var selection = Set<URL>()
@@ -140,14 +142,26 @@ struct FileBrowserView: View {
                 .help(showsSearchPanel ? "Hide Search" : "Show Search")
             }
         }
-        .focusedSceneValue(\.browserDisplaySettings, displaySettings)
-        .focusedSceneValue(\.browserFolderURL, navigation.current)
+        .modifier(FileBrowserFocusedSceneModifier(
+            isActive: isActive,
+            displaySettings: displaySettings,
+            folderURL: navigation.current
+        ))
         .onChange(of: navigation.current, initial: true) { _, url in
+            guard isActive else { return }
             WindowLaunchCoordinator.noteFocusedFolder(url)
+        }
+        .onChange(of: isActive) { _, active in
+            if active {
+                WindowLaunchCoordinator.noteFocusedFolder(navigation.current)
+                if !isSearchPresented {
+                    listFocused = true
+                }
+            }
         }
         .onAppear {
             reload()
-            if !isSearchPresented {
+            if isActive, !isSearchPresented {
                 listFocused = true
             }
         }
@@ -895,6 +909,23 @@ struct FileBrowserView: View {
         } catch {
             renameErrorMessage = error.localizedDescription
             // Stay in rename mode so the user can fix the name.
+        }
+    }
+}
+
+private struct FileBrowserFocusedSceneModifier: ViewModifier {
+    var isActive: Bool
+    var displaySettings: BrowserDisplaySettings
+    var folderURL: URL
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+                .focusedSceneValue(\.browserDisplaySettings, displaySettings)
+                .focusedSceneValue(\.browserFolderURL, folderURL)
+        } else {
+            content
         }
     }
 }
