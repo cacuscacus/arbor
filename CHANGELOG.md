@@ -13,11 +13,8 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ### Added
 
-<<<<<<< HEAD
 - Help → **Check for Updates…** compares the installed version to the latest GitHub Release (open release page / copy `brew upgrade --cask arbor`)
-=======
 - Context menu **Open in New Window** for a selected folder (browser and Favorites sidebar)
->>>>>>> origin/feature/open-in-new-window
 
 ## [1.2.0] — 2026-08-04
 
