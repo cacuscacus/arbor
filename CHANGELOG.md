@@ -15,6 +15,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 - Help → **Release History…** loads [`CHANGELOG.md`](CHANGELOG.md) from the public GitHub repo
 - Help → **View Releases on GitHub**
+- Release History marks the **Installed** version next to the matching changelog section
 
 ## [1.1.0] — 2026-08-04
 

@@ -17,6 +17,14 @@ struct ReleaseHistoryView: View {
     @State private var markdownSource = ""
     @State private var loadState: LoadState = .loading
 
+    private var installedVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var installedBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
     private enum LoadState: Equatable {
         case loading
         case loaded
@@ -40,7 +48,7 @@ struct ReleaseHistoryView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Release History")
                     .font(.headline)
-                Text("Loaded from the Arbor repository on GitHub")
+                Text("Installed \(installedVersion) (\(installedBuild)) · loaded from GitHub")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -88,12 +96,13 @@ struct ReleaseHistoryView: View {
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded:
-            // SwiftUI `Text(AttributedString(markdown:))` collapses block structure;
-            // render Keep a Changelog line-by-line instead.
             ScrollView {
-                ChangelogDocumentView(source: markdownSource)
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                ChangelogDocumentView(
+                    source: markdownSource,
+                    installedVersion: installedVersion
+                )
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -125,6 +134,7 @@ struct ReleaseHistoryView: View {
 
 private struct ChangelogDocumentView: View {
     let source: String
+    let installedVersion: String
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 6) {
@@ -143,10 +153,22 @@ private struct ChangelogDocumentView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 2)
         case .h2(let text):
-            inlineText(text)
-                .font(.title2.weight(.semibold))
-                .padding(.top, 14)
-                .padding(.bottom, 2)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                inlineText(text)
+                    .font(.title2.weight(.semibold))
+                if isInstalledReleaseHeading(text) {
+                    Text("Installed")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .foregroundStyle(.white)
+                        .background(Capsule().fill(Color.accentColor))
+                        .accessibilityLabel("This is the installed version")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 14)
+            .padding(.bottom, 2)
         case .h3(let text):
             inlineText(text)
                 .font(.headline)
@@ -167,6 +189,43 @@ private struct ChangelogDocumentView: View {
             Spacer()
                 .frame(height: 6)
         }
+    }
+
+    private func isInstalledReleaseHeading(_ heading: String) -> Bool {
+        // Match Keep a Changelog headings like `[1.1.0] — 2026-08-04`.
+        guard let version = Self.versionNumber(in: heading) else { return false }
+        return versionsMatch(version, installedVersion)
+    }
+
+    /// Extracts `1.1.0` from `[1.1.0] — date` or `1.1.0 — date`.
+    private static func versionNumber(in heading: String) -> String? {
+        if let start = heading.firstIndex(of: "["),
+           let end = heading[start...].firstIndex(of: "]")
+        {
+            let inner = heading[heading.index(after: start) ..< end]
+            let value = String(inner).trimmingCharacters(in: .whitespaces)
+            if value.compare("Unreleased", options: .caseInsensitive) == .orderedSame {
+                return nil
+            }
+            return value
+        }
+        return nil
+    }
+
+    private func versionsMatch(_ a: String, _ b: String) -> Bool {
+        let lhs = a.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhs = b.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lhs == rhs { return true }
+        // Treat `1.1` and `1.1.0` as the same marketing version.
+        let leftParts = lhs.split(separator: ".").map(String.init)
+        let rightParts = rhs.split(separator: ".").map(String.init)
+        let count = max(leftParts.count, rightParts.count)
+        for index in 0 ..< count {
+            let l = index < leftParts.count ? leftParts[index] : "0"
+            let r = index < rightParts.count ? rightParts[index] : "0"
+            if l != r { return false }
+        }
+        return !leftParts.isEmpty && !rightParts.isEmpty
     }
 
     private func inlineText(_ markdownLine: String) -> Text {
