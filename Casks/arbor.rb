@@ -11,7 +11,7 @@ cask "arbor" do
   desc "Native open-source file manager for developers and power users"
   homepage "https://github.com/cacuscacus/arbor"
 
-  depends_on macos: ">= :tahoe"
+  depends_on macos: :tahoe
 
   app "Arbor.app"
 
