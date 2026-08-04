@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Root layout: tab bar + sidebar + file browser. Wired to Rust via FFI in a later pass.
+/// Root layout: tab bar + sidebar + file browser (optional horizontal split per tab).
+/// Wired to Rust via FFI in a later pass.
 struct ContentView: View {
     @State private var tabs: [BrowserTab]
     @State private var selectedTabID: BrowserTab.ID
@@ -29,18 +30,22 @@ struct ContentView: View {
                     SidebarView(
                         navigation: tab.navigation,
                         favorites: favorites,
-                        dragState: dragState
+                        dragState: dragState,
+                        onOpenInSplit: { url in
+                            tab.openInSplit(folder: url)
+                        }
                     )
                     .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
                 }
             } detail: {
                 // Keep every tab's browser mounted so @State (selection, view mode, …)
                 // survives tab switches; only the active tab receives hits / focus values.
+                // Within a tab, both split panes stay mounted for the same reason.
                 ZStack {
                     ForEach(tabs) { tab in
                         let active = tab.id == selectedTabID
-                        FileBrowserView(
-                            navigation: tab.navigation,
+                        TabDetailView(
+                            tab: tab,
                             favorites: favorites,
                             dragState: dragState,
                             isActive: active
@@ -57,6 +62,7 @@ struct ContentView: View {
         }
         .background(WindowChromeConfigurator())
         .focusEffectDisabled()
+        .focusedSceneValue(\.activeBrowserTab, selectedTab)
         .background {
             tabShortcuts
         }
@@ -129,6 +135,65 @@ struct ContentView: View {
             let nextIndex = min(index, tabs.count - 1)
             selectedTabID = tabs[nextIndex].id
         }
+    }
+}
+
+/// Detail column for one tab: single browser or horizontal dual-pane split.
+private struct TabDetailView: View {
+    @Bindable var tab: BrowserTab
+    @Bindable var favorites: SidebarFavoritesStore
+    var dragState: FileDragState
+    var isActive: Bool
+
+    var body: some View {
+        Group {
+            if tab.isSplit {
+                HSplitView {
+                    ForEach(tab.panes) { pane in
+                        PaneBrowserHost(
+                            tab: tab,
+                            pane: pane,
+                            favorites: favorites,
+                            dragState: dragState,
+                            isActive: isActive && tab.focusedPaneID == pane.id
+                        )
+                    }
+                }
+            } else if let pane = tab.panes.first {
+                PaneBrowserHost(
+                    tab: tab,
+                    pane: pane,
+                    favorites: favorites,
+                    dragState: dragState,
+                    isActive: isActive
+                )
+            }
+        }
+    }
+}
+
+private struct PaneBrowserHost: View {
+    @Bindable var tab: BrowserTab
+    @Bindable var pane: BrowserPane
+    @Bindable var favorites: SidebarFavoritesStore
+    var dragState: FileDragState
+    var isActive: Bool
+
+    var body: some View {
+        FileBrowserView(
+            navigation: pane.navigation,
+            favorites: favorites,
+            dragState: dragState,
+            isActive: isActive,
+            onOpenInSplit: { url in
+                tab.openInSplit(folder: url)
+            }
+        )
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                tab.focusPane(pane.id)
+            }
+        )
     }
 }
 

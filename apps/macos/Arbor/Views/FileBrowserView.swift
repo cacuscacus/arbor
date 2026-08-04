@@ -5,8 +5,10 @@ struct FileBrowserView: View {
     @Bindable var navigation: BrowserNavigation
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
-    /// When multiple tab browsers stay mounted, only the selected tab publishes scene focus values.
+    /// When multiple tab / split browsers stay mounted, only the focused pane publishes scene focus values.
     var isActive: Bool = true
+    /// Opens a folder in the other split pane (creates a split if needed).
+    var onOpenInSplit: ((URL) -> Void)? = nil
 
     @State private var entries: [FileEntry] = []
     @State private var selection = Set<URL>()
@@ -110,24 +112,12 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
-        .navigationTitle(isSearchActive ? "Search" : path.lastPathComponent)
-        // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass
-        // into a solid bar. Let the system glass toolbar float and group items.
-        .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                navigationButtons
-            }
-
-            ToolbarSpacer(.fixed)
-
-            ToolbarItemGroup(placement: .navigation) {
-                undoRedoButtons
-            }
-
-            ToolbarSpacer(.flexible)
-
-            // Finder places view mode next to search on the trailing side.
-            ToolbarItemGroup(placement: .primaryAction) {
+        .modifier(FileBrowserChromeModifier(
+            isActive: isActive,
+            navigationTitle: isSearchActive ? "Search" : path.lastPathComponent,
+            navigationButtons: { navigationButtons },
+            undoRedoButtons: { undoRedoButtons },
+            trailingToolbar: {
                 viewModePicker
 
                 Button {
@@ -141,7 +131,7 @@ struct FileBrowserView: View {
                 }
                 .help(showsSearchPanel ? "Hide Search" : "Show Search")
             }
-        }
+        ))
         .modifier(FileBrowserFocusedSceneModifier(
             isActive: isActive,
             displaySettings: displaySettings,
@@ -201,6 +191,7 @@ struct FileBrowserView: View {
             shortcutButtons
         }
         .onKeyPress(keys: [.escape], phases: .down) { _ in
+            guard isActive else { return .ignored }
             if renamingURL != nil {
                 cancelRename()
                 return .handled
@@ -216,15 +207,18 @@ struct FileBrowserView: View {
             return .ignored
         }
         .onKeyPress(keys: [.init("/")], phases: .down) { _ in
+            guard isActive else { return .ignored }
             if searchFocused { return .ignored }
             presentSearch()
             return .handled
         }
         .onKeyPress(.return) {
+            guard isActive else { return .ignored }
             if renamingURL != nil || searchFocused { return .ignored }
             return openSelection()
         }
         .onKeyPress(.delete) {
+            guard isActive else { return .ignored }
             if renamingURL != nil || searchFocused { return .ignored }
             return moveSelectionToTrash()
         }
@@ -254,47 +248,50 @@ struct FileBrowserView: View {
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
     }
 
+    @ViewBuilder
     private var shortcutButtons: some View {
-        Group {
-            Button("") { presentSearch() }
-                .keyboardShortcut("f", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+        if isActive {
+            Group {
+                Button("") { presentSearch() }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { selectAllVisible() }
-                .keyboardShortcut("a", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { selectAllVisible() }
+                    .keyboardShortcut("a", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { goToParent() }
-                .keyboardShortcut(.upArrow, modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { goToParent() }
+                    .keyboardShortcut(.upArrow, modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { performUndo() }
-                .keyboardShortcut("z", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { performUndo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { performRedo() }
-                .keyboardShortcut("z", modifiers: [.command, .shift])
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { performRedo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { goBack() }
-                .keyboardShortcut("[", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { goBack() }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { goForward() }
-                .keyboardShortcut("]", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { goForward() }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
 
-            Button("") { _ = moveSelectionToTrash() }
-                .keyboardShortcut(.delete, modifiers: [])
-                .opacity(0)
-                .allowsHitTesting(false)
+                Button("") { _ = moveSelectionToTrash() }
+                    .keyboardShortcut(.delete, modifiers: [])
+                    .opacity(0)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -481,6 +478,12 @@ struct FileBrowserView: View {
             Button("Open in New Window") {
                 commitContextSelection(anchor: anchor)
                 WindowLaunchCoordinator.openNewWindow(cloning: only.id)
+            }
+            if let onOpenInSplit {
+                Button("Open in Split") {
+                    commitContextSelection(anchor: anchor)
+                    onOpenInSplit(only.id)
+                }
             }
         }
 
@@ -909,6 +912,44 @@ struct FileBrowserView: View {
         } catch {
             renameErrorMessage = error.localizedDescription
             // Stay in rename mode so the user can fix the name.
+        }
+    }
+}
+
+private struct FileBrowserChromeModifier<Nav: View, Undo: View, Trailing: View>: ViewModifier {
+    var isActive: Bool
+    var navigationTitle: String
+    @ViewBuilder var navigationButtons: () -> Nav
+    @ViewBuilder var undoRedoButtons: () -> Undo
+    @ViewBuilder var trailingToolbar: () -> Trailing
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+                .navigationTitle(navigationTitle)
+                // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass
+                // into a solid bar. Let the system glass toolbar float and group items.
+                .toolbar {
+                    ToolbarItemGroup(placement: .navigation) {
+                        navigationButtons()
+                    }
+
+                    ToolbarSpacer(.fixed)
+
+                    ToolbarItemGroup(placement: .navigation) {
+                        undoRedoButtons()
+                    }
+
+                    ToolbarSpacer(.flexible)
+
+                    // Finder places view mode next to search on the trailing side.
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        trailingToolbar()
+                    }
+                }
+        } else {
+            content
         }
     }
 }

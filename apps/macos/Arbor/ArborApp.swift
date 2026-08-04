@@ -32,6 +32,8 @@ struct ArborApp: App {
                 }
             }
             CommandMenu("View") {
+                SplitViewCommands()
+                Divider()
                 IconViewCommands()
             }
         }
@@ -64,6 +66,23 @@ private struct NewWindowCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: .command)
         }
+    }
+}
+
+private struct SplitViewCommands: View {
+    @FocusedValue(\.activeBrowserTab) private var tab
+
+    var body: some View {
+        Button("Toggle Split View") {
+            tab?.toggleSplit()
+        }
+        .keyboardShortcut("\\", modifiers: .command)
+        .disabled(tab == nil)
+
+        Button("Close Split View") {
+            tab?.closeSplit()
+        }
+        .disabled(tab?.isSplit != true)
     }
 }
 

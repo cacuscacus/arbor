@@ -269,6 +269,14 @@ private struct BrowserDisplaySettingsFocusedKey: FocusedValueKey {
     typealias Value = BrowserDisplaySettings
 }
 
+private struct BrowserFolderURLFocusedKey: FocusedValueKey {
+    typealias Value = URL
+}
+
+private struct ActiveBrowserTabFocusedKey: FocusedValueKey {
+    typealias Value = BrowserTab
+}
+
 extension FocusedValues {
     var browserDisplaySettings: BrowserDisplaySettings? {
         get { self[BrowserDisplaySettingsFocusedKey.self] }
@@ -279,8 +287,10 @@ extension FocusedValues {
         get { self[BrowserFolderURLFocusedKey.self] }
         set { self[BrowserFolderURLFocusedKey.self] = newValue }
     }
-}
 
-private struct BrowserFolderURLFocusedKey: FocusedValueKey {
-    typealias Value = URL
+    /// Selected tab in the key window (split toggle / close commands).
+    var activeBrowserTab: BrowserTab? {
+        get { self[ActiveBrowserTabFocusedKey.self] }
+        set { self[ActiveBrowserTabFocusedKey.self] = newValue }
+    }
 }

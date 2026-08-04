@@ -105,14 +105,15 @@ Finder-style tabs inside a window so one frame can host multiple folders:
 - ⬚ Drag folder onto tab bar / “Open in New Tab”
 - ⬚ Optional: merge all windows into tabs / move tab to new window
 
-### Split view (planned)
+### Split view
 
 Two (later more) folder panes in one window for side-by-side browsing:
 
-- ⬚ Horizontal split (primary); vertical split as follow-up
-- ⬚ Each pane has its own cwd, selection, and history
-- ⬚ Drag-and-drop between panes (copy/move with same semantics as between windows)
-- ⬚ “Open in Split” from selection or tab
+- ✓ Horizontal split (primary)
+- ⬚ Vertical split as follow-up
+- ✓ Each pane has its own cwd, selection, and history
+- ✓ Drag-and-drop between panes (copy/move with same semantics as between windows)
+- ✓ “Open in Split” from selection (browser / Favorites); View → Toggle Split View (⌘\) / Close Split View
 
 Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
 
