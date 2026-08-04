@@ -9,6 +9,7 @@ import SwiftUI
 enum WindowLaunchCoordinator {
     private static var pendingRoots: [URL] = []
     private static var openBrowserWindow: ((URL) -> Void)?
+    private static var openBareBrowserWindow: (() -> Void)?
     private static var lastOpenAt: Date?
 
     /// Last focused browser folder — used by Dock menu when SwiftUI focus is unavailable.
@@ -37,6 +38,11 @@ enum WindowLaunchCoordinator {
             enqueueRoot(root)
             openWindow(id: "browser")
         }
+        openBareBrowserWindow = {
+            openWindow(id: "browser")
+        }
+        // First installed window opens any remaining restored WindowGroup instances.
+        BrowserSessionStore.shared.openRemainingRestoredWindowsIfNeeded()
     }
 
     static func openNewWindow(cloning folder: URL? = nil) {
@@ -50,5 +56,11 @@ enum WindowLaunchCoordinator {
         let root = (folder ?? lastFocusedFolder ?? FileManager.default.homeDirectoryForCurrentUser)
             .standardizedFileURL
         openBrowserWindow?(root)
+    }
+
+    /// Session restore: open without debounce and without enqueueing a root —
+    /// `ContentView` dequeues a full `BrowserWindowSnapshot` instead.
+    static func openRestoredBrowserWindow() {
+        openBareBrowserWindow?()
     }
 }

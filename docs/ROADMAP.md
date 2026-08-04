@@ -91,10 +91,10 @@ Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0)
 - ✓ Independent windows (separate navigation / selection / view state; shared favorites)
 - ✓ Dock click with no open windows restores a **single** window (reopen vs SwiftUI default de-duplicated)
 - ⬚ Open window from a selected folder (“Open in New Window”)
-- ⬚ Persist per-window: frame (position/size/screen), sidebar width, view mode, sort, cwd, optional terminal visibility
+- ◐ Persist per-window: frame (position/size), tab pane cwds, focused pane, selected tab (not yet: sidebar width, view mode, sort, terminal visibility)
 - ⬚ Persist global: favorites, tool presets, default agent, appearance
-- ⬚ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
-- ⬚ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
+- ✓ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
+- ✓ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
 
 ### Tabs
 
@@ -207,9 +207,9 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.0.0 browser MVP
 ✓ v1.1.0 multi-window (New Window / Dock)
 ✓ v1.2.0 Help → Release History (CHANGELOG.md)
-  → next: tabs / split / “Open in New Window” / session restore
+  → next: tabs / split / “Open in New Window” / session restore (MVP window+tabs+split paths)
   → Terminal + agent runners → Quick diff / Git
   → Automation & remotes → Linux UI → Windows UI
 ```
 
-Phase 3 window **basics** and in-app release history are done; tabs, split view, and session persistence are the remaining Phase 3 work before heavier terminal / agent investment if windowing UX is still the bottleneck.
+Phase 3 window basics, tabs, split view, and session restore MVP are in; richer per-window UI state (view mode / sort / sidebar width) and terminal / agent investment follow.

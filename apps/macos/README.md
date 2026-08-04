@@ -86,8 +86,9 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - Favorites are shared across windows; navigation and selection are per-window
 - **Tabs** (tab bar above the split view): **⌘T** opens a new tab at the active tab’s current folder; **⌘W** closes the selected tab (closes the window when it is the last tab). Each tab has its own navigation stack; selection and display settings are preserved while switching. Favorites stay shared.
 - **Split view** (per tab): **View → Toggle Split View** (⌘\) opens a second horizontal pane (clone of the focused folder); **Close Split View** (menu or toggle again) keeps the focused pane’s folder. Right-click a folder → **Open in Split** navigates the other pane (enters split if needed). Sidebar clicks and toolbar / display menus follow the **focused** pane. Both panes share the window’s `FileDragState`, so drag-and-drop between panes works like between windows.
+- **Session restore**: on quit (and when windows change), Arbor writes open windows to `~/Library/Application Support/Arbor/session.json` (atomic temp-file rename). Relaunch restores each window’s frame, tabs, per-pane folder URLs, focused pane, and selected tab. Missing folders fall back to Home. Dock reopen with no windows still opens a single new window (does not duplicate blanks).
 
-Session restore (positions after restart) and tab reorder / “Open in New Tab” are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
+Tab reorder / “Open in New Tab” are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
 
 ### Help
 

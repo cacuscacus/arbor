@@ -9,16 +9,42 @@ struct ContentView: View {
     @State private var favorites = SidebarFavoritesStore.shared
     @State private var dragState = FileDragState()
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var sessionWindowID = UUID()
+    @State private var restoredFrame: CGRect?
 
     init(rootDirectory: URL? = nil) {
+        if rootDirectory == nil, let snapshot = BrowserSessionStore.shared.dequeuePendingWindow() {
+            let material = snapshot.makeBrowserTabs()
+            _tabs = State(initialValue: material.tabs)
+            _selectedTabID = State(initialValue: material.selectedTabID)
+            if let frame = snapshot.frame, frame.isReasonable {
+                _restoredFrame = State(initialValue: frame.cgRect)
+            } else {
+                _restoredFrame = State(initialValue: nil)
+            }
+            return
+        }
+
         let root = rootDirectory ?? WindowLaunchCoordinator.dequeueRoot()
         let tab = BrowserTab(root: root)
         _tabs = State(initialValue: [tab])
         _selectedTabID = State(initialValue: tab.id)
+        _restoredFrame = State(initialValue: nil)
     }
 
     private var selectedTab: BrowserTab? {
         tabs.first { $0.id == selectedTabID }
+    }
+
+    /// Paths + focus + selection — drives debounced session persistence.
+    private var sessionFingerprint: String {
+        let tabPart = tabs.map { tab in
+            let paths = tab.panes.map { $0.navigation.current.path }.joined(separator: "\u{1e}")
+            let focus = tab.panes.firstIndex(where: { $0.id == tab.focusedPaneID }) ?? 0
+            return "\(paths)\u{1f}\(focus)"
+        }.joined(separator: "\u{1d}")
+        let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID }) ?? 0
+        return "\(tabPart)\u{1c}\(selectedIndex)"
     }
 
     var body: some View {
@@ -61,10 +87,23 @@ struct ContentView: View {
             .navigationSplitViewStyle(.automatic)
         }
         .background(WindowChromeConfigurator())
+        .background(
+            SessionWindowFrameTracker(
+                windowID: sessionWindowID,
+                initialFrame: restoredFrame
+            )
+        )
         .focusEffectDisabled()
         .focusedSceneValue(\.activeBrowserTab, selectedTab)
         .background {
             tabShortcuts
+        }
+        .onChange(of: sessionFingerprint, initial: true) { _, _ in
+            publishSession()
+        }
+        .onDisappear {
+            BrowserSessionStore.shared.removeWindow(id: sessionWindowID)
+            BrowserSessionStore.shared.saveNow()
         }
     }
 
@@ -134,6 +173,99 @@ struct ContentView: View {
         if selectedTabID == id {
             let nextIndex = min(index, tabs.count - 1)
             selectedTabID = tabs[nextIndex].id
+        }
+    }
+
+    private func publishSession() {
+        let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID }) ?? 0
+        let tabSnaps = tabs.map { tab in
+            BrowserTabSnapshot(
+                panePaths: tab.panes.map { $0.navigation.current.path },
+                focusedPaneIndex: tab.panes.firstIndex(where: { $0.id == tab.focusedPaneID }) ?? 0
+            )
+        }
+        BrowserSessionStore.shared.updateWindow(
+            id: sessionWindowID,
+            snapshot: BrowserWindowSnapshot(
+                frame: nil,
+                selectedTabIndex: selectedIndex,
+                tabs: tabSnaps
+            )
+        )
+    }
+}
+
+/// Applies a restored `NSWindow` frame once and reports move/resize for session save.
+private struct SessionWindowFrameTracker: NSViewRepresentable {
+    let windowID: UUID
+    let initialFrame: CGRect?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(windowID: windowID)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.attach(to: view, initialFrame: initialFrame)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Coordinator {
+        let windowID: UUID
+        private var observers: [NSObjectProtocol] = []
+        private var didApplyInitial = false
+        private weak var observedWindow: NSWindow?
+
+        init(windowID: UUID) {
+            self.windowID = windowID
+        }
+
+        deinit {
+            let center = NotificationCenter.default
+            observers.forEach { center.removeObserver($0) }
+        }
+
+        func attach(to view: NSView, initialFrame: CGRect?) {
+            DispatchQueue.main.async { [weak self] in
+                self?.install(on: view, initialFrame: initialFrame, attemptsLeft: 20)
+            }
+        }
+
+        private func install(on view: NSView, initialFrame: CGRect?, attemptsLeft: Int) {
+            guard let window = view.window else {
+                guard attemptsLeft > 0 else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self?.install(on: view, initialFrame: initialFrame, attemptsLeft: attemptsLeft - 1)
+                }
+                return
+            }
+
+            if observedWindow !== window {
+                let center = NotificationCenter.default
+                observers.forEach { center.removeObserver($0) }
+                observers.removeAll()
+                observedWindow = window
+
+                for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+                    let token = center.addObserver(forName: name, object: window, queue: .main) {
+                        [weak self] notification in
+                        guard let self,
+                              let win = notification.object as? NSWindow
+                        else { return }
+                        BrowserSessionStore.shared.updateFrame(id: self.windowID, frame: win.frame)
+                    }
+                    observers.append(token)
+                }
+            }
+
+            if !didApplyInitial, let initialFrame, BrowserWindowFrame(initialFrame).isReasonable {
+                window.setFrame(initialFrame, display: true)
+                didApplyInitial = true
+            }
+
+            BrowserSessionStore.shared.updateFrame(id: windowID, frame: window.frame)
         }
     }
 }

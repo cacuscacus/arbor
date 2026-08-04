@@ -29,6 +29,17 @@ final class BrowserTab: Identifiable {
         focusedPaneID = pane.id
     }
 
+    /// Restores a tab with one or two panes (horizontal split when `paneRoots.count > 1`).
+    init(id: UUID = UUID(), paneRoots: [URL], focusedPaneIndex: Int = 0) {
+        self.id = id
+        let roots = Array(paneRoots.prefix(2))
+        precondition(!roots.isEmpty, "BrowserTab requires at least one pane root")
+        let built = roots.map { BrowserPane(root: $0) }
+        panes = built
+        let index = min(max(0, focusedPaneIndex), built.count - 1)
+        focusedPaneID = built[index].id
+    }
+
     var isSplit: Bool { panes.count > 1 }
 
     var focusedPane: BrowserPane {
