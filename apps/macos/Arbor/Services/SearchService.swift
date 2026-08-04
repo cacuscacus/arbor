@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Darwin
 
 enum SearchScope: String, CaseIterable, Identifiable, Sendable {
     case currentFolder = "This Folder"
@@ -35,6 +36,57 @@ struct SearchHit: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Interpreted filename query: plain substring or shell-style glob (`*`, `?`, `[…]`).
+struct FilenameSearchPattern: Sendable, Equatable {
+    enum Kind: Sendable, Equatable {
+        /// Case-insensitive substring of the filename (current default UX).
+        case substring(String)
+        /// Filename glob, e.g. `blabla*.json`, `*.md`, `report-??.txt`.
+        case glob(String)
+    }
+
+    let kind: Kind
+
+    init(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Self.containsGlobMetacharacters(trimmed) {
+            kind = .glob(trimmed)
+        } else {
+            kind = .substring(trimmed)
+        }
+    }
+
+    var isEmpty: Bool {
+        switch kind {
+        case .substring(let s), .glob(let s):
+            return s.isEmpty
+        }
+    }
+
+    /// `true` when the query uses `*`, `?`, or a character class.
+    var isGlob: Bool {
+        if case .glob = kind { return true }
+        return false
+    }
+
+    private static func containsGlobMetacharacters(_ value: String) -> Bool {
+        var inClass = false
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "*", "?":
+                if !inClass { return true }
+            case "[":
+                inClass = true
+            case "]":
+                if inClass { return true }
+            default:
+                break
+            }
+        }
+        return false
+    }
+}
+
 /// Filename search for the macOS UI. Prefers `fd`, then Spotlight (`mdfind`), then a walk fallback.
 enum SearchService {
     nonisolated static let resultLimit = 500
@@ -44,8 +96,8 @@ enum SearchService {
         scope: SearchScope,
         currentFolder: URL
     ) async throws -> [SearchHit] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        let pattern = FilenameSearchPattern(query)
+        guard !pattern.isEmpty else { return [] }
 
         try Task.checkCancellation()
 
@@ -58,39 +110,53 @@ enum SearchService {
             }
         }()
 
-        if let hits = try await searchWithFd(query: trimmed, root: root) {
+        if let hits = try await searchWithFd(pattern: pattern, root: root) {
             return hits
         }
 
-        if scope == .global, let hits = try await searchWithSpotlight(query: trimmed) {
+        if scope == .global, let hits = try await searchWithSpotlight(pattern: pattern) {
             return hits
         }
 
-        return try await searchWithEnumerator(query: trimmed, root: root)
+        return try await searchWithEnumerator(pattern: pattern, root: root)
     }
 
     // MARK: - fd
 
-    nonisolated private static func searchWithFd(query: String, root: URL) async throws -> [SearchHit]? {
+    /// `fd` is ideal here: globs use its `--glob` matcher (same engine style as ripgrep),
+    /// substrings stay `--fixed-strings`. Both stay O(tree) with ignore rules and an early cap.
+    nonisolated private static func searchWithFd(
+        pattern: FilenameSearchPattern,
+        root: URL
+    ) async throws -> [SearchHit]? {
         guard let fd = resolveFdPath() else { return nil }
 
-        let output = try await runProcess(
-            executable: fd,
-            arguments: [
-                "--color=never",
-                "--fixed-strings",
-                "--ignore-case",
-                "--max-results", "\(resultLimit)",
-                "--exclude", ".git",
-                "--exclude", "node_modules",
-                "--exclude", "DerivedData",
-                "--exclude", "target",
-                "--exclude", ".build",
-                query,
-                root.path,
-            ]
-        )
+        var arguments = [
+            "--color=never",
+            "--ignore-case",
+            "--max-results", "\(resultLimit)",
+            "--exclude", ".git",
+            "--exclude", "node_modules",
+            "--exclude", "DerivedData",
+            "--exclude", "target",
+            "--exclude", ".build",
+        ]
 
+        let query: String
+        switch pattern.kind {
+        case .substring(let text):
+            // Literal substring anywhere in the path entry name / path as fd matches.
+            arguments.append("--fixed-strings")
+            query = text
+        case .glob(let glob):
+            // Shell-style: `blabla*.json`, `*.swift`, `img-??.png`
+            arguments.append("--glob")
+            query = glob
+        }
+
+        arguments.append(contentsOf: [query, root.path])
+
+        let output = try await runProcess(executable: fd, arguments: arguments)
         try Task.checkCancellation()
         return parsePathLines(output, relativeTo: root)
     }
@@ -109,13 +175,26 @@ enum SearchService {
 
     // MARK: - Spotlight
 
-    nonisolated private static func searchWithSpotlight(query: String) async throws -> [SearchHit]? {
+    /// Spotlight’s `kMDItemFSName` already speaks glob (`*` / `?`). Metadata index = fast for Global.
+    nonisolated private static func searchWithSpotlight(
+        pattern: FilenameSearchPattern
+    ) async throws -> [SearchHit]? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let namePredicate: String
+        switch pattern.kind {
+        case .substring(let text):
+            // Wrap with * so "note" matches "my-note.txt". Escape glob mets in the literal.
+            namePredicate = "kMDItemFSName == '*\(escapeSpotlightLiteral(text))*'cd"
+        case .glob(let glob):
+            // Pass user wildcards through; only escape quotes / backslashes.
+            namePredicate = "kMDItemFSName == '\(escapeSpotlightGlob(glob))'cd"
+        }
+
         let output = try await runProcess(
             executable: "/usr/bin/mdfind",
             arguments: [
                 "-onlyin", home,
-                "kMDItemFSName == '*\(escapeSpotlight(query))*'cd",
+                namePredicate,
             ]
         )
 
@@ -127,7 +206,8 @@ enum SearchService {
         return hits
     }
 
-    nonisolated private static func escapeSpotlight(_ value: String) -> String {
+    /// Escape a literal fragment so embedded `*` / `?` are not wildcards.
+    nonisolated private static func escapeSpotlightLiteral(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
@@ -136,10 +216,20 @@ enum SearchService {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// Escape only quoting hazards; leave `*` / `?` / `[…]` as Spotlight globs.
+    nonisolated private static func escapeSpotlightGlob(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     // MARK: - Fallback walk
 
-    nonisolated private static func searchWithEnumerator(query: String, root: URL) async throws -> [SearchHit] {
-        let needle = query.lowercased()
+    nonisolated private static func searchWithEnumerator(
+        pattern: FilenameSearchPattern,
+        root: URL
+    ) async throws -> [SearchHit] {
         let rootPath = root.path
 
         return try await Task.detached(priority: .userInitiated) {
@@ -166,7 +256,7 @@ enum SearchService {
                 }
 
                 let name = next.lastPathComponent
-                guard name.lowercased().contains(needle) else { continue }
+                guard matchesFilename(name, pattern: pattern) else { continue }
 
                 let values = try? next.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
                 let isDirectory = values?.isDirectory ?? false
@@ -197,6 +287,20 @@ enum SearchService {
 
             return hits
         }.value
+    }
+
+    nonisolated private static func matchesFilename(_ name: String, pattern: FilenameSearchPattern) -> Bool {
+        switch pattern.kind {
+        case .substring(let text):
+            return name.localizedCaseInsensitiveContains(text)
+        case .glob(let glob):
+            // POSIX fnmatch: same semantics as shell globs, case-insensitive.
+            return glob.withCString { patternC in
+                name.withCString { nameC in
+                    fnmatch(patternC, nameC, FNM_CASEFOLD) == 0
+                }
+            }
+        }
     }
 
     // MARK: - Helpers

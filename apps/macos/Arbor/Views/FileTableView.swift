@@ -37,13 +37,13 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 22)
                     } else {
+                        // `Text` is hittable by default and steals the mouse from
+                        // `TableRow.itemProvider`, so drag never starts on the name.
+                        // Pass hits through; rename is handled via AppKit clicks.
                         Text(entry.name)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onRequestRename(entry)
-                            }
+                            .allowsHitTesting(false)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -140,10 +140,21 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
             emptySpaceMenu()
         }
         .background {
-            TableDoubleClickInstaller(rowCount: entries.count) { row in
-                guard entries.indices.contains(row) else { return }
-                onOpenRow(entries[row])
-            }
+            TableInteractionInstaller(
+                rowCount: entries.count,
+                isRowSelected: { row in
+                    guard entries.indices.contains(row) else { return false }
+                    return selection.contains(entries[row].id)
+                },
+                onDoubleClickRow: { row in
+                    guard entries.indices.contains(row) else { return }
+                    onOpenRow(entries[row])
+                },
+                onRenameRow: { row in
+                    guard entries.indices.contains(row) else { return }
+                    onRequestRename(entries[row])
+                }
+            )
         }
         .focusEffectDisabled()
     }

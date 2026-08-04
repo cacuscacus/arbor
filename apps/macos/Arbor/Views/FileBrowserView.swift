@@ -83,17 +83,11 @@ struct FileBrowserView: View {
 
     private var browserScaffold: some View {
         VStack(spacing: 0) {
+            // Keep content swaps (browse ↔ search results) inside this slot so the
+            // floating search overlay is NOT recreated with them — that was
+            // stealing TextField focus after the first character.
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    if showsSearchPanel {
-                        floatingSearchPanel
-                            .padding(.top, 10)
-                            .padding(.trailing, 12)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy(duration: 0.18), value: showsSearchPanel)
 
             if !isSearchActive {
                 Divider()
@@ -105,6 +99,15 @@ struct FileBrowserView: View {
                 )
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if showsSearchPanel {
+                floatingSearchPanel
+                    .padding(.top, 10)
+                    .padding(.trailing, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
         .navigationTitle(isSearchActive ? "Search" : path.lastPathComponent)
         // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass
         // into a solid bar. Let the system glass toolbar float and group items.
@@ -140,7 +143,9 @@ struct FileBrowserView: View {
         .focusedSceneValue(\.browserDisplaySettings, displaySettings)
         .onAppear {
             reload()
-            listFocused = true
+            if !isSearchPresented {
+                listFocused = true
+            }
         }
         .onChange(of: navigation.current) { _, _ in
             cancelRename()
@@ -150,7 +155,9 @@ struct FileBrowserView: View {
             } else if !isSearchActive {
                 reload()
             }
-            listFocused = true
+            if !searchFocused && !isSearchPresented {
+                listFocused = true
+            }
         }
         .onChange(of: selection) { _, _ in
             selectionMarkedAt = Date()
@@ -196,7 +203,7 @@ struct FileBrowserView: View {
             return .handled
         }
         .onKeyPress(.return) {
-            if renamingURL != nil { return .ignored }
+            if renamingURL != nil || searchFocused { return .ignored }
             return openSelection()
         }
         .onKeyPress(.delete) {
@@ -566,6 +573,10 @@ struct FileBrowserView: View {
                 searchHits = hits
                 pruneSelection(to: Set(hits.map(\.id)))
                 isSearching = false
+                // Results rebuild the grid below; keep caret in the search field.
+                if isSearchPresented {
+                    searchFocused = true
+                }
             } catch is CancellationError {
                 // Superseded by a newer query.
             } catch {
@@ -574,6 +585,9 @@ struct FileBrowserView: View {
                 selection = []
                 searchError = error.localizedDescription
                 isSearching = false
+                if isSearchPresented {
+                    searchFocused = true
+                }
             }
         }
     }

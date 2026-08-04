@@ -101,6 +101,21 @@ final class SidebarFavoritesStore {
         persist()
     }
 
+    /// Move an existing favorite so it sits at `toIndex` (0...count).
+    func relocate(id: UUID, to toIndex: Int) {
+        guard let from = items.firstIndex(where: { $0.id == id }) else { return }
+        var updated = items
+        let item = updated.remove(at: from)
+        var destination = max(0, min(toIndex, updated.count + 1))
+        if from < destination {
+            destination -= 1
+        }
+        destination = max(0, min(destination, updated.count))
+        updated.insert(item, at: destination)
+        items = updated
+        persist()
+    }
+
     func contains(_ url: URL) -> Bool {
         let path = url.standardizedFileURL.path
         return items.contains { $0.url.path == path }

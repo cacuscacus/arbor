@@ -21,20 +21,25 @@ struct SearchBarView: View {
                     .frame(minWidth: 160, idealWidth: 220, maxWidth: 280)
                     .focused(focus)
 
-                if isSearching {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                // Keep a stable trailing slot so ProgressView ↔ clear-button
+                // swaps don't recreate the TextField and drop keyboard focus.
+                ZStack {
+                    if isSearching {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear search")
                     }
-                    .buttonStyle(.plain)
-                    .help("Clear search")
                 }
+                .frame(width: 14, height: 14)
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
@@ -49,12 +54,13 @@ struct SearchBarView: View {
             .frame(width: 140)
             .help("Search scope")
 
-            if let resultCount, !query.isEmpty, !isSearching {
-                Text(resultLabel(resultCount))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
+            Text(resultCount.map(resultLabel) ?? " ")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 36, alignment: .trailing)
+                .opacity(resultCount != nil && !query.isEmpty && !isSearching ? 1 : 0)
+                .accessibilityHidden(resultCount == nil || query.isEmpty || isSearching)
 
             if let onDismiss {
                 Button {
@@ -75,9 +81,9 @@ struct SearchBarView: View {
     private var placeholder: String {
         switch scope {
         case .currentFolder:
-            return "Search folder"
+            return "Search folder — try *.json"
         case .global:
-            return "Search home"
+            return "Search home — try blabla*.json"
         }
     }
 
