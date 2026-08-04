@@ -4,8 +4,8 @@ import AppKit
 
 /// Finder-like sidebar implemented with ScrollView — **not** SwiftUI `List`.
 ///
-/// `List` / `.sidebar` is backed by `NSOutlineView`, which draws a focus ring that
-/// fights the detail file table. Avoiding `List` removes that outline view.
+/// Favorites support live drag previews: surrounding rows slide out of the way
+/// before drop, and newly pinned folders appear with a spring insert.
 struct SidebarView: View {
     @Bindable var navigation: BrowserNavigation
     @Bindable var favorites: SidebarFavoritesStore
@@ -13,37 +13,25 @@ struct SidebarView: View {
 
     @State private var draggingFavoriteID: UUID?
     @State private var dropTargetIndex: Int?
+    @Namespace private var favoritesNamespace
+
+    private let listSpring = Animation.spring(response: 0.34, dampingFraction: 0.84)
+    private let interactiveSpring = Animation.interactiveSpring(response: 0.28, dampingFraction: 0.86)
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 sectionHeader("Favorites")
 
-                ForEach(Array(favorites.items.enumerated()), id: \.element.id) { index, item in
-                    favoriteRow(item, index: index)
-                }
+                favoritesList
 
-                // Trailing drop slot so users can drag to the end of the list.
+                // Drop zone after the last real/preview row.
                 Color.clear
-                    .frame(height: 10)
+                    .frame(height: 12)
                     .contentShape(Rectangle())
-                    .overlay(alignment: .top) {
-                        if dropTargetIndex == favorites.items.count {
-                            Capsule()
-                                .fill(Color.accentColor)
-                                .frame(height: 2)
-                                .padding(.horizontal, 14)
-                        }
-                    }
                     .onDrop(
                         of: [.text, .fileURL],
-                        delegate: SidebarDropDelegate(
-                            index: favorites.items.count,
-                            dragState: dragState,
-                            draggingFavoriteID: $draggingFavoriteID,
-                            dropTargetIndex: $dropTargetIndex,
-                            favorites: favorites
-                        )
+                        delegate: makeDropDelegate(insertIndex: favorites.items.count)
                     )
 
                 sectionHeader("Places")
@@ -60,22 +48,134 @@ struct SidebarView: View {
         .scrollIndicators(.never)
         .scrollContentBackground(.hidden)
         .focusEffectDisabled()
-        // Clear reorder insertion cue + drag flags when the mouse goes up
-        // (cancelled drops often skip `dropExited` / `performDrop`).
         .background {
             DragSessionEndedCleaner {
-                draggingFavoriteID = nil
-                dropTargetIndex = nil
-                dragState.clear()
+                // Delay past DropDelegate.performDrop so insert index / urls
+                // aren't cleared mid-drop.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(listSpring) {
+                        draggingFavoriteID = nil
+                        dropTargetIndex = nil
+                    }
+                    dragState.clear()
+                }
             }
         }
         .onDrop(
             of: [.fileURL],
             delegate: SidebarSectionFileDropDelegate(
                 dragState: dragState,
-                favorites: favorites
+                dropTargetIndex: $dropTargetIndex,
+                favorites: favorites,
+                animation: listSpring
             )
         )
+        .onChange(of: dragState.urls) { _, urls in
+            if !urls.isEmpty, dropTargetIndex == nil, draggingFavoriteID == nil {
+                withAnimation(interactiveSpring) {
+                    dropTargetIndex = favorites.items.count
+                }
+            }
+            if urls.isEmpty, draggingFavoriteID == nil {
+                withAnimation(listSpring) {
+                    dropTargetIndex = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var favoritesList: some View {
+        let rows = previewRows
+        let insertAt = dropTargetIndex ?? favorites.items.count
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(rows) { row in
+                switch row {
+                case .favorite(let item, let sourceIndex, let isLifted):
+                    favoriteRow(item, dropIndex: sourceIndex, isLifted: isLifted)
+                        .matchedGeometryEffect(id: item.id, in: favoritesNamespace)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .leading)).combined(with: .offset(y: -6)),
+                                removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .leading))
+                            )
+                        )
+                case .ghostAdd(let url):
+                    // Ghosts must accept the drop — otherwise it falls through to
+                    // the section delegate which always appended at the end.
+                    ghostAddRow(url: url)
+                        .onDrop(
+                            of: [.fileURL],
+                            delegate: makeDropDelegate(insertIndex: insertAt)
+                        )
+                        .transition(
+                            .opacity
+                                .combined(with: .scale(scale: 0.96, anchor: .leading))
+                                .combined(with: .offset(y: -4))
+                        )
+                }
+            }
+        }
+        .animation(interactiveSpring, value: rows.map(\.animationKey))
+    }
+
+    private func makeDropDelegate(insertIndex: Int) -> SidebarDropDelegate {
+        SidebarDropDelegate(
+            index: insertIndex,
+            dragState: dragState,
+            draggingFavoriteID: $draggingFavoriteID,
+            dropTargetIndex: $dropTargetIndex,
+            favorites: favorites,
+            animation: interactiveSpring
+        )
+    }
+
+    /// Live layout shown while dragging: either a provisional reorder, or ghost
+    /// slots for folders about to be pinned from the browser.
+    private var previewRows: [FavoritePreviewRow] {
+        if let dragID = draggingFavoriteID,
+           let from = favorites.items.firstIndex(where: { $0.id == dragID })
+        {
+            let hover = dropTargetIndex ?? from
+            var items = favorites.items
+            let moved = items.remove(at: from)
+            var dest = max(0, min(hover, items.count + 1))
+            if from < dest { dest -= 1 }
+            dest = max(0, min(dest, items.count))
+            items.insert(moved, at: dest)
+            return items.map { item in
+                let source = favorites.items.firstIndex(where: { $0.id == item.id }) ?? 0
+                return .favorite(item, sourceIndex: source, isLifted: item.id == dragID)
+            }
+        }
+
+        let pending = pendingAddURLs
+        if !pending.isEmpty {
+            let hover = min(max(dropTargetIndex ?? favorites.items.count, 0), favorites.items.count)
+            var rows: [FavoritePreviewRow] = favorites.items.enumerated().map { index, item in
+                .favorite(item, sourceIndex: index, isLifted: false)
+            }
+            rows.insert(contentsOf: pending.map { .ghostAdd($0) }, at: hover)
+            return rows
+        }
+
+        return favorites.items.enumerated().map { index, item in
+            .favorite(item, sourceIndex: index, isLifted: false)
+        }
+    }
+
+    private var pendingAddURLs: [URL] {
+        guard draggingFavoriteID == nil else { return [] }
+        let existing = Set(favorites.items.map(\.url.path))
+        return dragState.urls
+            .map(\.standardizedFileURL)
+            .filter { url in
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+                      isDir.boolValue
+                else { return false }
+                return !existing.contains(url.path)
+            }
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -88,9 +188,8 @@ struct SidebarView: View {
             .textCase(.uppercase)
     }
 
-    private func favoriteRow(_ item: FavoriteItem, index: Int) -> some View {
+    private func favoriteRow(_ item: FavoriteItem, dropIndex: Int, isLifted: Bool) -> some View {
         let isCurrent = item.url == navigation.current.standardizedFileURL
-        let showInsertion = dropTargetIndex == index && draggingFavoriteID != nil && draggingFavoriteID != item.id
 
         return Button {
             navigation.go(to: item.url)
@@ -107,35 +206,45 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isCurrent ? Color.primary.opacity(0.08) : Color.clear)
         }
-        .overlay(alignment: .top) {
-            if showInsertion {
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(height: 2)
-                    .padding(.horizontal, 6)
-                    .offset(y: -1)
-            }
-        }
-        .opacity(draggingFavoriteID == item.id ? 0.35 : 1)
+        .scaleEffect(isLifted ? 1.03 : 1.0)
+        .opacity(isLifted ? 0.55 : 1)
+        .shadow(color: isLifted ? .black.opacity(0.12) : .clear, radius: isLifted ? 6 : 0, y: isLifted ? 2 : 0)
+        .zIndex(isLifted ? 1 : 0)
         .onDrag {
             draggingFavoriteID = item.id
+            dropTargetIndex = dropIndex
             return NSItemProvider(object: item.id.uuidString as NSString)
         }
         .onDrop(
             of: [.text, .fileURL],
-            delegate: SidebarDropDelegate(
-                index: index,
-                dragState: dragState,
-                draggingFavoriteID: $draggingFavoriteID,
-                dropTargetIndex: $dropTargetIndex,
-                favorites: favorites
-            )
+            delegate: makeDropDelegate(insertIndex: dropIndex)
         )
         .contextMenu {
             Button("Remove from Favorites", role: .destructive) {
-                favorites.remove(id: item.id)
+                withAnimation(listSpring) {
+                    favorites.remove(id: item.id)
+                }
             }
         }
+    }
+
+    private func ghostAddRow(url: URL) -> some View {
+        Label(url.lastPathComponent, systemImage: "folder")
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.08))
+                    }
+            }
+            .opacity(0.95)
     }
 
     private func placesRow(_ title: String, systemImage: String) -> some View {
@@ -147,6 +256,24 @@ struct SidebarView: View {
     }
 }
 
+// MARK: - Preview model
+
+private enum FavoritePreviewRow: Identifiable {
+    case favorite(FavoriteItem, sourceIndex: Int, isLifted: Bool)
+    case ghostAdd(URL)
+
+    var id: String {
+        switch self {
+        case .favorite(let item, _, _):
+            return "fav-\(item.id.uuidString)"
+        case .ghostAdd(let url):
+            return "ghost-\(url.path)"
+        }
+    }
+
+    var animationKey: String { id }
+}
+
 // MARK: - Drop handling
 
 private struct SidebarDropDelegate: DropDelegate {
@@ -155,55 +282,66 @@ private struct SidebarDropDelegate: DropDelegate {
     @Binding var draggingFavoriteID: UUID?
     @Binding var dropTargetIndex: Int?
     let favorites: SidebarFavoritesStore
+    let animation: Animation
 
     func validateDrop(info: DropInfo) -> Bool {
         true
     }
 
     func dropEntered(info: DropInfo) {
-        if draggingFavoriteID != nil || info.hasItemsConforming(to: [.text]) {
+        withAnimation(animation) {
             dropTargetIndex = index
         }
     }
 
     func dropExited(info: DropInfo) {
-        if dropTargetIndex == index {
-            dropTargetIndex = nil
-        }
+        // Keep last hover; mouse-up cleaner resets.
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        if !dragState.urls.isEmpty || info.hasItemsConforming(to: [.fileURL]) {
-            // Don't show reorder cue while pinning a folder from the browser.
-            dropTargetIndex = nil
+        withAnimation(animation) {
+            dropTargetIndex = index
+        }
+        if !dragState.urls.isEmpty || info.hasItemsConforming(to: [.fileURL]),
+           draggingFavoriteID == nil
+        {
             return DropProposal(operation: .copy)
         }
-        dropTargetIndex = index
         return DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        // Capture then clear cues immediately so the blue insertion line can't stick.
+        // Capture before any cleaner / async work can wipe state.
         let favoriteID = draggingFavoriteID
         let fileURLs = dragState.urls
-        dropTargetIndex = nil
-        draggingFavoriteID = nil
+        let committedIndex = dropTargetIndex ?? index
+
+        withAnimation(animation) {
+            dropTargetIndex = nil
+            draggingFavoriteID = nil
+        }
 
         if !fileURLs.isEmpty {
             dragState.clear()
-            favorites.insert(urls: fileURLs, at: index)
+            withAnimation(animation) {
+                _ = favorites.insert(urls: fileURLs, at: committedIndex)
+            }
             return true
         }
 
         if info.hasItemsConforming(to: [.fileURL]) {
             loadFileURLs(from: info.itemProviders(for: [.fileURL])) { urls in
-                favorites.insert(urls: urls, at: index)
+                withAnimation(animation) {
+                    _ = favorites.insert(urls: urls, at: committedIndex)
+                }
             }
             return true
         }
 
         if let favoriteID {
-            favorites.relocate(id: favoriteID, to: index)
+            withAnimation(animation) {
+                favorites.relocate(id: favoriteID, to: committedIndex)
+            }
             return true
         }
 
@@ -214,7 +352,9 @@ private struct SidebarDropDelegate: DropDelegate {
                   let id = UUID(uuidString: string)
             else { return }
             DispatchQueue.main.async {
-                favorites.relocate(id: id, to: index)
+                withAnimation(animation) {
+                    favorites.relocate(id: id, to: committedIndex)
+                }
             }
         }
         return true
@@ -250,10 +390,11 @@ private struct SidebarDropDelegate: DropDelegate {
     }
 }
 
-/// Whole-sidebar fallback for file drops that miss a specific row.
 private struct SidebarSectionFileDropDelegate: DropDelegate {
     let dragState: FileDragState
+    @Binding var dropTargetIndex: Int?
     let favorites: SidebarFavoritesStore
+    let animation: Animation
 
     func validateDrop(info: DropInfo) -> Bool {
         !dragState.urls.isEmpty || info.hasItemsConforming(to: [.fileURL])
@@ -264,28 +405,44 @@ private struct SidebarSectionFileDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        // Honor the live preview index — previously this always appended.
+        let committedIndex = dropTargetIndex ?? favorites.items.count
         let urls = dragState.urls
         dragState.clear()
+
         if !urls.isEmpty {
-            favorites.add(urls: urls)
+            withAnimation(animation) {
+                _ = favorites.insert(urls: urls, at: committedIndex)
+            }
+            withAnimation(animation) { dropTargetIndex = nil }
             return true
         }
 
         let providers = info.itemProviders(for: [.fileURL])
         guard !providers.isEmpty else { return false }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var loaded: [URL] = []
         for provider in providers {
+            group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                defer { group.leave() }
                 guard let url else { return }
-                DispatchQueue.main.async {
-                    favorites.add(urls: [url])
-                }
+                lock.lock()
+                loaded.append(url)
+                lock.unlock()
+            }
+        }
+        group.notify(queue: .main) {
+            withAnimation(animation) {
+                _ = favorites.insert(urls: loaded, at: committedIndex)
+                dropTargetIndex = nil
             }
         }
         return true
     }
 }
 
-/// Clears ephemeral drag UI when a mouse-up ends (or cancels) a drag session.
 private struct DragSessionEndedCleaner: NSViewRepresentable {
     var onEnded: () -> Void
 
@@ -312,7 +469,6 @@ private struct DragSessionEndedCleaner: NSViewRepresentable {
         let view = NSView()
         context.coordinator.onEnded = onEnded
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
-            // Defer so DropDelegate.performDrop can run first.
             DispatchQueue.main.async {
                 context.coordinator.onEnded()
             }
