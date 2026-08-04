@@ -192,6 +192,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
 - ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
+- ✓ [v1.2.0](https://github.com/cacuscacus/arbor/releases/tag/v1.2.0) — Help → Release History from [`CHANGELOG.md`](../CHANGELOG.md)
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ⬚ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -204,9 +205,10 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ```text
 ✓ v1.0.0 browser MVP
 ✓ v1.1.0 multi-window (New Window / Dock)
+✓ v1.2.0 Help → Release History (CHANGELOG.md)
   → next: tabs / split / “Open in New Window” / session restore
   → Terminal + agent runners → Quick diff / Git
   → Automation & remotes → Linux UI → Windows UI
 ```
 
-Phase 3 window **basics** are done; tabs, split view, and session persistence are the remaining Phase 3 work before heavier terminal / agent investment if windowing UX is still the bottleneck.
+Phase 3 window **basics** and in-app release history are done; tabs, split view, and session persistence are the remaining Phase 3 work before heavier terminal / agent investment if windowing UX is still the bottleneck.

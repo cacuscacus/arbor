@@ -11,11 +11,17 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-04
+
 ### Added
 
 - Help → **Release History…** loads [`CHANGELOG.md`](CHANGELOG.md) from the public GitHub repo
 - Help → **View Releases on GitHub**
 - Release History marks the **Installed** version next to the matching changelog section
+
+### Fixed
+
+- Release History changelog layout no longer collapses into a single run-on paragraph
 
 ## [1.1.0] — 2026-08-04
 
@@ -39,6 +45,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.2.0
 [1.1.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.0.0
