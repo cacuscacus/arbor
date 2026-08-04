@@ -10,6 +10,13 @@ enum WindowLaunchCoordinator {
     private static var pendingRoots: [URL] = []
     private static var openBrowserWindow: ((URL) -> Void)?
 
+    /// Last focused browser folder — used by Dock menu when SwiftUI focus is unavailable.
+    private(set) static var lastFocusedFolder: URL?
+
+    static func noteFocusedFolder(_ url: URL) {
+        lastFocusedFolder = url.standardizedFileURL
+    }
+
     static func enqueueRoot(_ url: URL) {
         pendingRoots.append(url.standardizedFileURL)
     }
@@ -32,7 +39,7 @@ enum WindowLaunchCoordinator {
     }
 
     static func openNewWindow(cloning folder: URL? = nil) {
-        let root = (folder ?? FileManager.default.homeDirectoryForCurrentUser)
+        let root = (folder ?? lastFocusedFolder ?? FileManager.default.homeDirectoryForCurrentUser)
             .standardizedFileURL
         openBrowserWindow?(root)
     }

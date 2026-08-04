@@ -79,8 +79,8 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 ### Multi-window
 
 - **File → New Window** (⌘N) opens an independent browser window
-- **Dock → New Window** uses the same command
-- New windows **clone the frontmost window’s folder** when one is focused; otherwise they open at Home
+- **Dock → right-click → New Window** (custom Dock menu) and **Dock → New Window** when shown
+- New windows **clone the frontmost / last-focused folder**; Home if none is known
 - Clicking the Dock icon with no windows open creates a new window again
 - Favorites are shared across windows; navigation and selection are per-window
 

@@ -142,6 +142,9 @@ struct FileBrowserView: View {
         }
         .focusedSceneValue(\.browserDisplaySettings, displaySettings)
         .focusedSceneValue(\.browserFolderURL, navigation.current)
+        .onChange(of: navigation.current, initial: true) { _, url in
+            WindowLaunchCoordinator.noteFocusedFolder(url)
+        }
         .onAppear {
             reload()
             if !isSearchPresented {

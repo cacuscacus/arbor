@@ -39,7 +39,7 @@ private struct WindowOpenInstaller: View {
     }
 }
 
-/// File → New Window (⌘N); also powers Dock “New Window” via the standard New menu item.
+/// File → New Window (⌘N). Dock right-click uses `applicationDockMenu`.
 private struct NewWindowCommands: Commands {
     @FocusedValue(\.browserFolderURL) private var browserFolderURL
 
