@@ -58,9 +58,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
-
+        Group {
             if isTerminalVisible {
                 VSplitView {
                     browserSplit
@@ -97,7 +95,7 @@ struct ContentView: View {
         }
     }
 
-    /// Sidebar + file browser detail (tabs stay mounted across switches).
+    /// Sidebar + detail; tab strip lives only in the detail column (Finder-style).
     private var browserSplit: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             if let tab = selectedTab {
@@ -112,22 +110,27 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
             }
         } detail: {
-            // Keep every tab's browser mounted so @State (selection, view mode, …)
-            // survives tab switches; only the active tab receives hits / focus values.
-            // Within a tab, both split panes stay mounted for the same reason.
-            ZStack {
-                ForEach(tabs) { tab in
-                    let active = tab.id == selectedTabID
-                    TabDetailView(
-                        tab: tab,
-                        favorites: favorites,
-                        dragState: dragState,
-                        isActive: active
-                    )
-                    .opacity(active ? 1 : 0)
-                    .allowsHitTesting(active)
-                    .accessibilityHidden(!active)
-                    .zIndex(active ? 1 : 0)
+            VStack(spacing: 0) {
+                // Finder keeps the sidebar full-height; tabs sit only above the file list.
+                detailTabBar
+
+                // Keep every tab's browser mounted so @State (selection, view mode, …)
+                // survives tab switches; only the active tab receives hits / focus values.
+                // Within a tab, both split panes stay mounted for the same reason.
+                ZStack {
+                    ForEach(tabs) { tab in
+                        let active = tab.id == selectedTabID
+                        TabDetailView(
+                            tab: tab,
+                            favorites: favorites,
+                            dragState: dragState,
+                            isActive: active
+                        )
+                        .opacity(active ? 1 : 0)
+                        .allowsHitTesting(active)
+                        .accessibilityHidden(!active)
+                        .zIndex(active ? 1 : 0)
+                    }
                 }
             }
         }
@@ -141,10 +144,11 @@ struct ContentView: View {
         }
     }
 
-    private var tabBar: some View {
+    /// Content-column tab strip: selected pill + trailing new-tab control (Finder-like).
+    private var detailTabBar: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     ForEach(tabs) { tab in
                         TabBarItem(
                             tab: tab,
@@ -154,19 +158,31 @@ struct ContentView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.leading, 10)
+                .padding(.vertical, 6)
             }
 
             Button(action: openNewTab) {
                 Image(systemName: "plus")
+                    .font(.body.weight(.medium))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Circle())
             }
             .buttonStyle(.borderless)
             .help("New Tab")
-            .padding(.trailing, 8)
+            .padding(.trailing, 10)
+            .padding(.leading, 4)
         }
-        .frame(minHeight: 34)
-        .background(.bar)
+        .background {
+            // Stay visually in the detail surface — avoid a full-width `.bar` that
+            // chops the Liquid Glass sidebar / toolbar.
+            Rectangle()
+                .fill(.clear)
+                .background(.ultraThinMaterial.opacity(0.35))
+        }
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.55)
+        }
     }
 
     private var tabShortcuts: some View {
@@ -363,7 +379,7 @@ private struct PaneBrowserHost: View {
     }
 }
 
-/// Single tab pill in the window tab bar.
+/// Single tab control in the detail-column tab strip (Finder-like pill).
 private struct TabBarItem: View {
     @Bindable var tab: BrowserTab
     var isSelected: Bool
@@ -374,32 +390,32 @@ private struct TabBarItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "folder.fill")
-                .font(.caption2)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-
             Text(tab.title)
-                .font(.callout)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .opacity(isHovering || isSelected ? 0.7 : 0)
+            .opacity(isHovering || isSelected ? 0.85 : 0)
             .help("Close Tab")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
         .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.10) : (isHovering ? Color.primary.opacity(0.05) : .clear))
+            Capsule(style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.12) : (isHovering ? Color.primary.opacity(0.06) : .clear))
         }
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(Capsule(style: .continuous))
         .onTapGesture(perform: onSelect)
         .onHover { isHovering = $0 }
         .help(tab.navigation.current.path)
+        .animation(.snappy(duration: 0.15), value: isSelected)
+        .animation(.snappy(duration: 0.12), value: isHovering)
     }
 }
 

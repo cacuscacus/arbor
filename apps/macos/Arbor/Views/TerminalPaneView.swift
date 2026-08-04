@@ -24,7 +24,10 @@ struct TerminalPaneView: View {
                 followCwd: followCwd
             )
             .id(restartToken)
+            // Inset the PTY glyph grid from the pane edges (text was flush to the border).
+            .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
         }
         .background(.background)
     }
