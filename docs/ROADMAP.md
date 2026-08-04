@@ -12,20 +12,22 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 - ✓ Public GitHub repository ([cacuscacus/arbor](https://github.com/cacuscacus/arbor))
 - ✓ Homebrew / GitHub Releases shipping path (see [RELEASES.md](RELEASES.md))
 - ✓ PR test gate (`./scripts/dev-check.sh` + GitHub Actions)
-- ◐ `arbor-core` directory listing API (+ tests)
-- ◐ `arbor-ffi` minimal C ABI (`list_dir`, version)
-- ◐ SwiftUI shell: sidebar, list/icon views, search, DnD, undo
+- ✓ `arbor-core` directory listing API (+ tests)
+- ✓ `arbor-ffi` minimal C ABI (`list_dir`, version)
+- ✓ SwiftUI shell MVP: sidebar, list/icon views, search, DnD, undo ([v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0))
 - ⬚ Move remaining FS work from Swift into `arbor-core` / FFI
-- ⬚ Keyboard navigation completeness (arrows, Enter, Backspace, `/` search)
+- ◐ Keyboard navigation (arrows, Enter, Backspace, `/` search — keep hardening)
 - ✓ `arbor-cli` for smoke tests without UI
 
 ---
 
 ## Phase 1 — Navigation & search
 
-- ⬚ Favorites, Recents, Volumes, Bookmarks, History
-- ⬚ Back / Forward, directory tree
-- ⬚ Instant filename search (`fd` / walk + ignore) driven by core
+- ✓ Favorites (sidebar, shared across windows, persisted)
+- ⬚ Recents, Volumes, Bookmarks, History
+- ✓ Back / Forward navigation stack
+- ⬚ Directory tree
+- ◐ Filename search (`fd` / Spotlight / walk in the macOS app; not yet driven by `arbor-core`)
 - ⬚ Query language: `kind:`, `ext:`, `size>`, `modified:`
 - ⬚ Virtual scrolling for large directories
 
@@ -73,7 +75,7 @@ Each preset stores: display name, executable, argv template, env overrides, work
 - Settings → Tools: enable/disable presets, set paths, defaults, keyboard shortcuts.
 - Never ship API keys in-repo; agents use the user’s own CLIs / auth.
 
-Related later work in Phase 4 (NL → Arbor-native actions) complements this; Phase 2 is **bring-your-own agent CLI inside Arbor’s folder context**.
+Related later work in Phase 5 (NL → Arbor-native actions) complements this; Phase 2 is **bring-your-own agent CLI inside Arbor’s folder context**.
 
 ---
 
@@ -83,8 +85,11 @@ Goal: Arbor feels like a real desktop app across restarts and crashes — Finder
 
 ### Windows
 
-- ◐ **New Window** from File menu (⌘N) and Dock icon menu; clones the frontmost folder when possible (macOS)
-- ◐ Independent windows (separate navigation / selection / view state; shared favorites)
+Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0):
+
+- ✓ **New Window** from File menu (⌘N) and Dock right-click menu; clones the frontmost / last-focused folder
+- ✓ Independent windows (separate navigation / selection / view state; shared favorites)
+- ✓ Dock click with no open windows restores a **single** window (reopen vs SwiftUI default de-duplicated)
 - ⬚ Open window from a selected folder (“Open in New Window”)
 - ⬚ Persist per-window: frame (position/size/screen), sidebar width, view mode, sort, cwd, optional terminal visibility
 - ⬚ Persist global: favorites, tool presets, default agent, appearance
@@ -185,8 +190,10 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ macOS packaging script (`scripts/package-macos.sh`)
 - ✓ Homebrew cask in-repo (`Casks/arbor.rb`)
 - ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
+- ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
+- ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
 - ⬚ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
-- ⬚ Broader macOS deployment target (v1.0.0 requires macOS 26 / Tahoe APIs)
+- ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
 - ⬚ Linux / Windows release channels once Phase 7 UIs exist
 
 ---
@@ -194,8 +201,11 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ## Milestone sketch (ordering)
 
 ```text
-macOS core polish → Multi-window / tabs / split → Terminal + agent runners
-        → Quick diff / Git → Automation & remotes → Linux UI → Windows UI
+✓ v1.0.0 browser MVP
+✓ v1.1.0 multi-window (New Window / Dock)
+  → next: tabs / split / “Open in New Window” / session restore
+  → Terminal + agent runners → Quick diff / Git
+  → Automation & remotes → Linux UI → Windows UI
 ```
 
-Multi-window New Window is the first slice of Phase 3; tabs and split view follow before heavy terminal work if windowing UX is the bottleneck.
+Phase 3 window **basics** are done; tabs, split view, and session persistence are the remaining Phase 3 work before heavier terminal / agent investment if windowing UX is still the bottleneck.
