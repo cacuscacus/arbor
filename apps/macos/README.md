@@ -76,7 +76,7 @@ brew install --cask arbor
 
 Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires macOS 26 (Tahoe)+.**
 
-### Multi-window
+### Multi-window / tabs
 
 - **File → New Window** (⌘N) opens an independent browser window
 - **Dock → right-click → New Window** (custom Dock menu) and **Dock → New Window** when shown
@@ -84,8 +84,9 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - New windows **clone the frontmost / last-focused folder**; Home if none is known
 - Clicking the Dock icon with no windows open creates a new window again
 - Favorites are shared across windows; navigation and selection are per-window
+- **Tabs** (tab bar above the split view): **⌘T** opens a new tab at the active tab’s current folder; **⌘W** closes the selected tab (closes the window when it is the last tab). Each tab has its own navigation stack; selection and display settings are preserved while switching. Favorites stay shared.
 
-Session restore (positions after restart), tabs, and split view are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
+Session restore (positions after restart), tab reorder / “Open in New Tab”, and split view are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
 
 ### Help
 
