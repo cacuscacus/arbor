@@ -18,7 +18,7 @@ brew install --cask arbor
 
 Direct downloads: [GitHub Releases](https://github.com/cacuscacus/arbor/releases). First launch may need Finder → right-click → **Open**.
 
-Maintainer release process: [docs/RELEASES.md](docs/RELEASES.md).
+What’s in each version: [`CHANGELOG.md`](CHANGELOG.md) (also **Help → Release History** in the app). Maintainer process: [docs/RELEASES.md](docs/RELEASES.md).
 
 ---
 
@@ -88,6 +88,7 @@ arbor/
 │   ├── arbor-ffi/      # FFI bridge (+ unit tests)
 │   └── arbor-cli/      # CLI (+ integration tests)
 ├── Casks/              # Homebrew cask
+├── CHANGELOG.md        # Release history (Help → Release History)
 ├── docs/               # Architecture, roadmap, releases, vision
 ├── scripts/            # dev-check, packaging
 └── .github/workflows/  # CI
@@ -97,7 +98,7 @@ arbor/
 
 ## Status
 
-**Public MVP on macOS.** v1.0.0 ships a Finder-like browser (list/icon views, search, DnD, undo) via Homebrew / GitHub Releases. The UI still talks to the filesystem directly in places; Rust `arbor-core` / FFI ownership is the next hardening step.
+**Public MVP on macOS.** [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) shipped the Finder-like browser; [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) added multi-window. See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ### Near-term focus
 

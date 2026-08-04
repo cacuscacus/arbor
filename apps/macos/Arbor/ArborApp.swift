@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -15,6 +16,16 @@ struct ArborApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About Arbor") {
                     AboutWindowController.shared.show()
+                }
+            }
+            CommandGroup(replacing: .help) {
+                Button("Release History…") {
+                    ReleaseHistoryWindowController.shared.show()
+                }
+                Button("View Releases on GitHub") {
+                    if let url = URL(string: "https://github.com/cacuscacus/arbor/releases") {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
             }
             CommandMenu("View") {

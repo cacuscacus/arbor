@@ -192,6 +192,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
 - ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
+- ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ⬚ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
 - ⬚ Linux / Windows release channels once Phase 7 UIs exist

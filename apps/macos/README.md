@@ -85,3 +85,8 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - Favorites are shared across windows; navigation and selection are per-window
 
 Session restore (positions after restart), tabs, and split view are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
+
+### Help
+
+- **Help → Release History…** — loads [`CHANGELOG.md`](../../CHANGELOG.md) from the public GitHub repo (`main`)
+- **Help → View Releases on GitHub** — opens the Releases page in a browser

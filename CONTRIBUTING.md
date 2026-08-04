@@ -50,7 +50,7 @@ Packaging / Homebrew release flow: [docs/RELEASES.md](docs/RELEASES.md).
 
 - [ ] `./scripts/dev-check.sh` passes locally
 - [ ] New behavior has tests (prefer `arbor-core` / CLI / FFI over UI-only logic)
-- [ ] Docs updated when behavior or install/release steps change (`README.md`, `docs/`, cask)
+- [ ] Docs updated when behavior or install/release steps change (`README.md`, `CHANGELOG.md`, `docs/`, cask)
 - [ ] No unrelated formatting or drive-by refactors
 - [ ] Clear PR description: *what* changed and *why*
 - [ ] macOS UI changes: note Xcode version + what you manually verified

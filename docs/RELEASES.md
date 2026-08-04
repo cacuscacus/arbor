@@ -72,26 +72,27 @@ Publish checksums in the release notes (or as `.sha256` files) so Homebrew and u
 Requires [GitHub CLI](https://cli.github.com/) (`gh`).
 
 1. **Bump versions** in Xcode (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`) and Cargo workspace if needed.
-2. **Package** the macOS app (from repo root):
+2. **Update** [`CHANGELOG.md`](../CHANGELOG.md): move `[Unreleased]` notes into a new `## [X.Y.Z] — YYYY-MM-DD` section (Added / Changed / Fixed). Keep compare links at the bottom current. This file is what **Help → Release History** shows in the app.
+3. **Package** the macOS app (from repo root):
    ```bash
    ./scripts/package-macos.sh
    ```
    This writes `dist/Arbor-<version>-macos-arm64.zip` and a `.sha256` sidecar.
-3. **Update** [`Casks/arbor.rb`](../Casks/arbor.rb) `version` + `sha256` to match the zip.
-4. **Commit** everything and push `main`.
-5. **Tag and push:**
+4. **Update** [`Casks/arbor.rb`](../Casks/arbor.rb) `version` + `sha256` to match the zip.
+5. **Commit** everything and push `main` (changelog must be on `main` before users open Release History for that version).
+6. **Tag and push:**
    ```bash
-   git tag -a v1.0.0 -m "v1.0.0"
-   git push origin v1.0.0
+   git tag -a v1.1.0 -m "v1.1.0"
+   git push origin v1.1.0
    ```
-6. **Create the GitHub Release** with the zip attached:
+7. **Create the GitHub Release** with the zip attached (notes should match / summarize the CHANGELOG section):
    ```bash
-   gh release create v1.0.0 \
-     --title "v1.0.0" \
+   gh release create v1.1.0 \
+     --title "v1.1.0" \
      --generate-notes \
-     ./dist/Arbor-1.0.0-macos-arm64.zip
+     ./dist/Arbor-1.1.0-macos-arm64.zip
    ```
-7. Users refresh the tap and upgrade: `brew update && brew upgrade --cask arbor`
+8. Users refresh the tap and upgrade: `brew update && brew upgrade --cask arbor`
 
 Dry-run tips:
 
