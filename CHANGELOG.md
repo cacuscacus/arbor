@@ -24,7 +24,8 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ### Fixed
 
-- Tab strip uses a system `safeAreaBar` (no custom materials) so the toolbar keeps Liquid Glass translucency with folder content scrolling behind it
+- Toolbar Liquid Glass translucency with folder content scrolling behind chrome
+- Tabs are a **floating glass island** of Finder-like pills (full-width distribution + trailing **+**); pills hide when only one tab remains (floating **+** stays); island overlays split so the divider is diffused under the chrome like folder icons
 
 ## [1.2.0] — 2026-08-04
 

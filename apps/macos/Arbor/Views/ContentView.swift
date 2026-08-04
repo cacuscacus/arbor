@@ -128,11 +128,10 @@ struct ContentView: View {
                     .zIndex(active ? 1 : 0)
                 }
             }
-            // Float tabs in a system safe-area bar (Finder-like) so folder content
-            // can scroll under toolbar + tab chrome and Liquid Glass stays translucent.
-            // A hard VStack + custom materials above the browser flattened the glass.
-            .safeAreaBar(edge: .top, spacing: 0) {
-                detailTabBar
+            // Overlay (not a layout sibling) so folder icons *and* the HSplitView
+            // divider sit under the glass island — same scroll-under feel as Finder.
+            .overlay(alignment: .top) {
+                detailTabChrome
             }
         }
         // Automatic style picks up Liquid Glass sidebar on Tahoe.
@@ -145,36 +144,50 @@ struct ContentView: View {
         }
     }
 
-    /// Content-column tab strip: selected pill + trailing new-tab control (Finder-like).
-    /// No custom materials — `safeAreaBar` provides the glass chrome.
-    private var detailTabBar: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(tabs) { tab in
-                        TabBarItem(
-                            tab: tab,
-                            isSelected: tab.id == selectedTabID,
-                            onSelect: { selectedTabID = tab.id },
-                            onClose: { closeTab(id: tab.id) }
-                        )
-                    }
+    /// Floating glass island of pills (+ trailing). Pills hide when only one tab remains;
+    /// a small floating **+** stays so new tabs are still discoverable without ⌘T.
+    @ViewBuilder
+    private var detailTabChrome: some View {
+        if tabs.count > 1 {
+            HStack(spacing: 2) {
+                ForEach(tabs) { tab in
+                    TabBarItem(
+                        tab: tab,
+                        isSelected: tab.id == selectedTabID,
+                        onSelect: { selectedTabID = tab.id },
+                        onClose: { closeTab(id: tab.id) }
+                    )
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.leading, 10)
-                .padding(.vertical, 5)
-            }
 
-            Button(action: openNewTab) {
-                Image(systemName: "plus")
-                    .font(.body.weight(.medium))
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
+                newTabButton
             }
-            .buttonStyle(.borderless)
-            .help("New Tab")
-            .padding(.trailing, 10)
-            .padding(.leading, 4)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 4)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+        } else {
+            HStack {
+                Spacer(minLength: 0)
+                newTabButton
+                    .glassEffect(.regular, in: Circle())
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
         }
+    }
+
+    private var newTabButton: some View {
+        Button(action: openNewTab) {
+            Image(systemName: "plus")
+                .font(.body.weight(.semibold))
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.borderless)
+        .help("New Tab")
     }
 
     private var tabShortcuts: some View {
@@ -371,7 +384,7 @@ private struct PaneBrowserHost: View {
     }
 }
 
-/// Single tab control in the detail-column tab strip (Finder-like pill).
+/// One tab inside the floating island — selected state is a Finder-like inner pill.
 private struct TabBarItem: View {
     @Bindable var tab: BrowserTab
     var isSelected: Bool
@@ -386,26 +399,24 @@ private struct TabBarItem: View {
                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .opacity(isHovering || isSelected ? 0.85 : 0)
+            .opacity(isHovering || isSelected ? 0.9 : 0)
             .help("Close Tab")
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background {
-            if isSelected {
-                Capsule(style: .continuous)
-                    .fill(.quaternary.opacity(0.9))
-            } else if isHovering {
-                Capsule(style: .continuous)
-                    .fill(.quaternary.opacity(0.45))
-            }
+            Capsule(style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.14) : (isHovering ? Color.primary.opacity(0.07) : .clear))
         }
         .contentShape(Capsule(style: .continuous))
         .onTapGesture(perform: onSelect)
