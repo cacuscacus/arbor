@@ -110,6 +110,7 @@ Cask lives in this repo at [`Casks/arbor.rb`](../Casks/arbor.rb) (tap the repo b
 
 ```bash
 brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
+brew trust cacuscacus/arbor   # Homebrew 6+ tap trust
 brew install --cask arbor
 brew upgrade --cask arbor
 ```

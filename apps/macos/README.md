@@ -68,6 +68,7 @@ Install from this repo’s cask (after a GitHub Release exists):
 
 ```bash
 brew tap cacuscacus/arbor https://github.com/cacuscacus/arbor
+brew trust cacuscacus/arbor   # required on Homebrew 6+
 brew install --cask arbor
 ```
 
