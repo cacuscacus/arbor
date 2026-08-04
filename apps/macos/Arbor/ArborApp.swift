@@ -19,6 +19,9 @@ struct ArborApp: App {
                 }
             }
             CommandGroup(replacing: .help) {
+                Button("Check for Updates…") {
+                    UpdateCheckService.checkForUpdates()
+                }
                 Button("Release History…") {
                     ReleaseHistoryWindowController.shared.show()
                 }

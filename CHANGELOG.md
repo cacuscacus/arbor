@@ -11,6 +11,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Added
+
+- Help → **Check for Updates…** compares the installed version to the latest GitHub Release (open release page / copy `brew upgrade --cask arbor`)
+
 ## [1.2.0] — 2026-08-04
 
 ### Added

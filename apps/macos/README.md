@@ -58,7 +58,7 @@ xcodebuild -project apps/macos/Arbor.xcodeproj -scheme Arbor -configuration Debu
 
 ## Releases & updates
 
-Shipping and update policy (GitHub Releases, Homebrew tap, planned **Check for Updates…** — no Sparkle / no Apple notarization): [`docs/RELEASES.md`](../../docs/RELEASES.md).
+Shipping and update policy (GitHub Releases, Homebrew tap, in-app **Check for Updates…** — no Sparkle / no Apple notarization): [`docs/RELEASES.md`](../../docs/RELEASES.md).
 
 Package a Release ZIP:
 
@@ -88,5 +88,6 @@ Session restore (positions after restart), tabs, and split view are planned — 
 
 ### Help
 
+- **Help → Check for Updates…** — compares `CFBundleShortVersionString` to the latest GitHub Release; opens the release page or copies `brew upgrade --cask arbor` (does not auto-install)
 - **Help → Release History…** — loads [`CHANGELOG.md`](../../CHANGELOG.md) from the public GitHub repo (`main`)
 - **Help → View Releases on GitHub** — opens the Releases page in a browser
