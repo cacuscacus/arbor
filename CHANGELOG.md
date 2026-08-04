@@ -18,6 +18,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Help → **Check for Updates…** compares the installed version to the latest GitHub Release (open release page / copy `brew upgrade --cask arbor`)
 - Context menu **Open in New Window** for a selected folder (browser and Favorites sidebar)
 - **Session restore**: quit/relaunch reopens Arbor browser windows with saved frames, tabs, split pane folder URLs, focused pane, and selected tab; missing paths fall back to Home; state is written atomically to `~/Library/Application Support/Arbor/session.json`
+- **Embedded terminal** pane (SwiftTerm PTY): bottom split bound to the focused browser folder; **View → Show/Hide Terminal** (⌘J or ⌃\`); **Follow Folder** toggle (default on) cds the shell when the browser navigates; **Restart** recreates the shell in the current folder; show/hide and follow preferences persist in UserDefaults
 
 ## [1.2.0] — 2026-08-04
 

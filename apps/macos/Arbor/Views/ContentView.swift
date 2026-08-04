@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Root layout: tab bar + sidebar + file browser (optional horizontal split per tab).
+/// Root layout: tab bar + sidebar + file browser (optional horizontal split per tab)
+/// and an optional embedded PTY terminal bound to the focused pane’s cwd.
 /// Wired to Rust via FFI in a later pass.
 struct ContentView: View {
     @State private var tabs: [BrowserTab]
@@ -11,6 +12,9 @@ struct ContentView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var sessionWindowID = UUID()
     @State private var restoredFrame: CGRect?
+    @AppStorage(TerminalPreferences.isVisibleKey) private var isTerminalVisible = false
+    @AppStorage(TerminalPreferences.followCwdKey) private var followCwd = true
+    @State private var terminalRestartToken = UUID()
 
     init(rootDirectory: URL? = nil) {
         if rootDirectory == nil, let snapshot = BrowserSessionStore.shared.dequeuePendingWindow() {
@@ -47,44 +51,30 @@ struct ContentView: View {
         return "\(tabPart)\u{1c}\(selectedIndex)"
     }
 
+    /// Focused browser pane folder (fallback Home) — drives the embedded shell cwd.
+    private var focusedFolderURL: URL {
+        selectedTab?.navigation.current
+            ?? FileManager.default.homeDirectoryForCurrentUser
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             tabBar
 
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                if let tab = selectedTab {
-                    SidebarView(
-                        navigation: tab.navigation,
-                        favorites: favorites,
-                        dragState: dragState,
-                        onOpenInSplit: { url in
-                            tab.openInSplit(folder: url)
-                        }
+            if isTerminalVisible {
+                VSplitView {
+                    browserSplit
+                    TerminalPaneView(
+                        cwd: focusedFolderURL,
+                        followCwd: $followCwd,
+                        restartToken: $terminalRestartToken
                     )
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
+                    .frame(minHeight: 120)
+                    .layoutPriority(-1)
                 }
-            } detail: {
-                // Keep every tab's browser mounted so @State (selection, view mode, …)
-                // survives tab switches; only the active tab receives hits / focus values.
-                // Within a tab, both split panes stay mounted for the same reason.
-                ZStack {
-                    ForEach(tabs) { tab in
-                        let active = tab.id == selectedTabID
-                        TabDetailView(
-                            tab: tab,
-                            favorites: favorites,
-                            dragState: dragState,
-                            isActive: active
-                        )
-                        .opacity(active ? 1 : 0)
-                        .allowsHitTesting(active)
-                        .accessibilityHidden(!active)
-                        .zIndex(active ? 1 : 0)
-                    }
-                }
+            } else {
+                browserSplit
             }
-            // Automatic style picks up Liquid Glass sidebar on Tahoe.
-            .navigationSplitViewStyle(.automatic)
         }
         .background(WindowChromeConfigurator())
         .background(
@@ -104,6 +94,50 @@ struct ContentView: View {
         .onDisappear {
             BrowserSessionStore.shared.removeWindow(id: sessionWindowID)
             BrowserSessionStore.shared.saveNow()
+        }
+    }
+
+    /// Sidebar + file browser detail (tabs stay mounted across switches).
+    private var browserSplit: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            if let tab = selectedTab {
+                SidebarView(
+                    navigation: tab.navigation,
+                    favorites: favorites,
+                    dragState: dragState,
+                    onOpenInSplit: { url in
+                        tab.openInSplit(folder: url)
+                    }
+                )
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
+            }
+        } detail: {
+            // Keep every tab's browser mounted so @State (selection, view mode, …)
+            // survives tab switches; only the active tab receives hits / focus values.
+            // Within a tab, both split panes stay mounted for the same reason.
+            ZStack {
+                ForEach(tabs) { tab in
+                    let active = tab.id == selectedTabID
+                    TabDetailView(
+                        tab: tab,
+                        favorites: favorites,
+                        dragState: dragState,
+                        isActive: active
+                    )
+                    .opacity(active ? 1 : 0)
+                    .allowsHitTesting(active)
+                    .accessibilityHidden(!active)
+                    .zIndex(active ? 1 : 0)
+                }
+            }
+        }
+        // Automatic style picks up Liquid Glass sidebar on Tahoe.
+        .navigationSplitViewStyle(.automatic)
+        // Focusing the PTY can collapse the sidebar; keep it while the terminal is open.
+        .onChange(of: columnVisibility) { _, newValue in
+            if isTerminalVisible, newValue == .detailOnly {
+                columnVisibility = .all
+            }
         }
     }
 

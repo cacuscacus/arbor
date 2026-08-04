@@ -104,7 +104,7 @@ arbor/
 
 1. Grow `arbor-core` + FFI coverage; thin the SwiftUI layer
 2. Richer search (`fd` / walk + query language)
-3. Embedded terminal per folder
+3. Terminal session restore, multiple terminal tabs, and in-window AI agent runners
 4. In-app **Check for Updates…** via GitHub Releases API
 
 See [docs/ROADMAP.md](docs/ROADMAP.md).

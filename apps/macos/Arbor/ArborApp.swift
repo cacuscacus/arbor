@@ -36,6 +36,8 @@ struct ArborApp: App {
             CommandMenu("View") {
                 SplitViewCommands()
                 Divider()
+                TerminalVisibilityCommands()
+                Divider()
                 IconViewCommands()
             }
         }
@@ -85,6 +87,24 @@ private struct SplitViewCommands: View {
             tab?.closeSplit()
         }
         .disabled(tab?.isSplit != true)
+    }
+}
+
+private struct TerminalVisibilityCommands: View {
+    @AppStorage(TerminalPreferences.isVisibleKey) private var isTerminalVisible = false
+
+    var body: some View {
+        Button(isTerminalVisible ? "Hide Terminal" : "Show Terminal") {
+            isTerminalVisible.toggle()
+        }
+        .keyboardShortcut("j", modifiers: .command)
+
+        // Alternate shortcut matching VS Code / Cursor (Control-`).
+        Button(isTerminalVisible ? "Hide Terminal" : "Show Terminal") {
+            isTerminalVisible.toggle()
+        }
+        .keyboardShortcut("`", modifiers: .control)
+        .hidden()
     }
 }
 

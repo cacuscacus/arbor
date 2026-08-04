@@ -35,11 +35,11 @@ Heavy directories such as `.git`, `node_modules`, `DerivedData`, `target`, and `
 
 ```
 apps/macos/
-├── Arbor.xcodeproj
+├── Arbor.xcodeproj          # SPM: SwiftTerm
 ├── Arbor/
 │   ├── ArborApp.swift
-│   ├── Views/
-│   ├── Services/          # LocalFileService, SearchService (temporary; replace with arbor-ffi)
+│   ├── Views/               # ContentView, TerminalPaneView, …
+│   ├── Services/            # LocalFileService, SearchService (temporary; replace with arbor-ffi)
 │   ├── Models/
 │   ├── Resources/
 │   └── Assets.xcassets
@@ -51,6 +51,14 @@ App Sandbox is **off** for local development so the file manager can read the fi
 Before PRs, run `./scripts/dev-check.sh` from the repo root (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). Rust / CLI tests run in GitHub Actions; SwiftUI still needs a manual smoke check in Xcode.
 
 ## Build from terminal
+
+SwiftTerm 1.15+ compiles Metal shaders. If `xcodebuild` fails with a missing `metal` tool, install once:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain
+```
+
+Then:
 
 ```bash
 xcodebuild -project apps/macos/Arbor.xcodeproj -scheme Arbor -configuration Debug build
@@ -87,6 +95,7 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - **Tabs** (tab bar above the split view): **⌘T** opens a new tab at the active tab’s current folder; **⌘W** closes the selected tab (closes the window when it is the last tab). Each tab has its own navigation stack; selection and display settings are preserved while switching. Favorites stay shared.
 - **Split view** (per tab): **View → Toggle Split View** (⌘\) opens a second horizontal pane (clone of the focused folder); **Close Split View** (menu or toggle again) keeps the focused pane’s folder. Right-click a folder → **Open in Split** navigates the other pane (enters split if needed). Sidebar clicks and toolbar / display menus follow the **focused** pane. Both panes share the window’s `FileDragState`, so drag-and-drop between panes works like between windows.
 - **Session restore**: on quit (and when windows change), Arbor writes open windows to `~/Library/Application Support/Arbor/session.json` (atomic temp-file rename). Relaunch restores each window’s frame, tabs, per-pane folder URLs, focused pane, and selected tab. Missing folders fall back to Home. Dock reopen with no windows still opens a single new window (does not duplicate blanks).
+- **Embedded terminal** (bottom `VSplitView`, [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) PTY): **View → Show/Hide Terminal** (⌘J or ⌃\`) toggles a shell bound to the **focused** browser pane’s folder. **Follow Folder** (default on, checkbox in the terminal header) sends `cd` when the browser navigates; turn it off to keep the shell cwd. **Restart** kills and recreates the shell in the current folder (`$SHELL` or `/bin/zsh`). Visibility and follow preferences persist in UserDefaults (per-window session restore of the terminal pane is not required for this MVP). Context menu **New Terminal Here** still opens Terminal.app externally.
 
 Tab reorder / “Open in New Tab” are planned — see [`docs/ROADMAP.md`](../../docs/ROADMAP.md) Phase 3.
 

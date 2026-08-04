@@ -39,10 +39,10 @@ Goal: the folder you are looking at is also a place to **work** and to **delegat
 
 ### 2a — Embedded terminal (cwd = current folder)
 
-- ⬚ Split / bottom / side terminal pane bound to the active directory
-- ⬚ When the browser navigates, offer “follow cwd” vs “keep session cwd”
-- ⬚ Shell profiles: system default (bash / zsh / fish / nushell / PowerShell) plus optional **Ghostty** integration when installed (external or embedded host — TBD by platform capabilities)
-- ⬚ Tabs / multiple sessions per window; copy/paste, clear, restart
+- ✓ Split / bottom / side terminal pane bound to the active directory
+- ✓ When the browser navigates, offer “follow cwd” vs “keep session cwd”
+- ◐ Shell profiles: system default (bash / zsh / fish / nushell via `$SHELL`) — Ghostty / extra profile picker still planned
+- ◐ Restart shell in current cwd (copy/paste via SwiftTerm); tabs / multiple sessions per window still planned
 - ⬚ Session restoration after restart (scrollback policy TBD; at least cwd + profile)
 
 ### 2b — Configurable AI coding tool runners
@@ -208,8 +208,8 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.1.0 multi-window (New Window / Dock)
 ✓ v1.2.0 Help → Release History (CHANGELOG.md)
   → next: tabs / split / “Open in New Window” / session restore (MVP window+tabs+split paths)
-  → Terminal + agent runners → Quick diff / Git
+  → Embedded terminal MVP (bottom pane + follow cwd) → agent runners → Quick diff / Git
   → Automation & remotes → Linux UI → Windows UI
 ```
 
-Phase 3 window basics, tabs, split view, and session restore MVP are in; richer per-window UI state (view mode / sort / sidebar width) and terminal / agent investment follow.
+Phase 3 window basics, tabs, split view, and session restore MVP are in; Phase 2a embedded terminal MVP (SwiftTerm bottom pane) is in; richer per-window UI state (view mode / sort / sidebar width / terminal visibility in session) and agent runners follow.
