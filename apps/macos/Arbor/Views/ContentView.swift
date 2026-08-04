@@ -110,28 +110,29 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
             }
         } detail: {
-            VStack(spacing: 0) {
-                // Finder keeps the sidebar full-height; tabs sit only above the file list.
-                detailTabBar
-
-                // Keep every tab's browser mounted so @State (selection, view mode, …)
-                // survives tab switches; only the active tab receives hits / focus values.
-                // Within a tab, both split panes stay mounted for the same reason.
-                ZStack {
-                    ForEach(tabs) { tab in
-                        let active = tab.id == selectedTabID
-                        TabDetailView(
-                            tab: tab,
-                            favorites: favorites,
-                            dragState: dragState,
-                            isActive: active
-                        )
-                        .opacity(active ? 1 : 0)
-                        .allowsHitTesting(active)
-                        .accessibilityHidden(!active)
-                        .zIndex(active ? 1 : 0)
-                    }
+            // Keep every tab's browser mounted so @State (selection, view mode, …)
+            // survives tab switches; only the active tab receives hits / focus values.
+            // Within a tab, both split panes stay mounted for the same reason.
+            ZStack {
+                ForEach(tabs) { tab in
+                    let active = tab.id == selectedTabID
+                    TabDetailView(
+                        tab: tab,
+                        favorites: favorites,
+                        dragState: dragState,
+                        isActive: active
+                    )
+                    .opacity(active ? 1 : 0)
+                    .allowsHitTesting(active)
+                    .accessibilityHidden(!active)
+                    .zIndex(active ? 1 : 0)
                 }
+            }
+            // Float tabs in a system safe-area bar (Finder-like) so folder content
+            // can scroll under toolbar + tab chrome and Liquid Glass stays translucent.
+            // A hard VStack + custom materials above the browser flattened the glass.
+            .safeAreaBar(edge: .top, spacing: 0) {
+                detailTabBar
             }
         }
         // Automatic style picks up Liquid Glass sidebar on Tahoe.
@@ -145,6 +146,7 @@ struct ContentView: View {
     }
 
     /// Content-column tab strip: selected pill + trailing new-tab control (Finder-like).
+    /// No custom materials — `safeAreaBar` provides the glass chrome.
     private var detailTabBar: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -159,7 +161,7 @@ struct ContentView: View {
                     }
                 }
                 .padding(.leading, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 5)
             }
 
             Button(action: openNewTab) {
@@ -172,16 +174,6 @@ struct ContentView: View {
             .help("New Tab")
             .padding(.trailing, 10)
             .padding(.leading, 4)
-        }
-        .background {
-            // Stay visually in the detail surface — avoid a full-width `.bar` that
-            // chops the Liquid Glass sidebar / toolbar.
-            Rectangle()
-                .fill(.clear)
-                .background(.ultraThinMaterial.opacity(0.35))
-        }
-        .overlay(alignment: .bottom) {
-            Divider().opacity(0.55)
         }
     }
 
@@ -407,8 +399,13 @@ private struct TabBarItem: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .background {
-            Capsule(style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.12) : (isHovering ? Color.primary.opacity(0.06) : .clear))
+            if isSelected {
+                Capsule(style: .continuous)
+                    .fill(.quaternary.opacity(0.9))
+            } else if isHovering {
+                Capsule(style: .continuous)
+                    .fill(.quaternary.opacity(0.45))
+            }
         }
         .contentShape(Capsule(style: .continuous))
         .onTapGesture(perform: onSelect)

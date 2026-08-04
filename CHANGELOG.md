@@ -22,6 +22,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Tab strip sits in the **detail column only** (Finder-style; sidebar stays full-height) with a trailing **+** control
 - Terminal PTY canvas insets glyph text from the pane edges
 
+### Fixed
+
+- Tab strip uses a system `safeAreaBar` (no custom materials) so the toolbar keeps Liquid Glass translucency with folder content scrolling behind it
+
 ## [1.2.0] — 2026-08-04
 
 ### Added
