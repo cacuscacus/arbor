@@ -17,7 +17,7 @@ Arbor aims to become the filesystem equivalent of VS Code:
 - **Extensible** — Rust plugins with Lua / Python / JavaScript scripting
 - **AI-first** — natural language that translates into real shell commands
 - **Cross-platform** — one Rust core, multiple UIs
-- **Open source** — MIT OR Apache-2.0
+- **Open source** — Apache-2.0
 
 Instead of merely browsing folders, Arbor becomes the control center for everything that happens around files: search, Git, terminals, automation, and AI — without jumping between Finder, Terminal, and your IDE.
 
@@ -140,9 +140,4 @@ Powered by `fd`, `ripgrep`, `fzf`, optional SQLite index, and Spotlight when use
 
 ## License
 
-Licensed under either of:
-
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT license](LICENSE-MIT)
-
-at your option.
+Licensed under the [Apache License, Version 2.0](LICENSE).

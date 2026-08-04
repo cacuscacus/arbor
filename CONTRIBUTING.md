@@ -35,4 +35,4 @@ Enable SwiftUI to render folders via FFI without touching std::fs directly.
 
 ## License
 
-By contributing, you agree that your contributions are dual-licensed under MIT OR Apache-2.0.
+By contributing, you agree that your contributions are licensed under Apache-2.0.
