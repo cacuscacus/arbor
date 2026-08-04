@@ -11,6 +11,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Added
+
+- Context menu **Open in New Window** for a selected folder (browser and Favorites sidebar)
+
 ## [1.2.0] — 2026-08-04
 
 ### Added
