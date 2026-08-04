@@ -7,9 +7,12 @@ final class ArborAppDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows flag: Bool
     ) -> Bool {
         if !flag {
+            // Open exactly one window ourselves. Returning `true` would also let
+            // SwiftUI's WindowGroup create another → duplicate windows.
             Task { @MainActor in
                 WindowLaunchCoordinator.openNewWindow()
             }
+            return false
         }
         return true
     }

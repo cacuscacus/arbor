@@ -9,6 +9,7 @@ import SwiftUI
 enum WindowLaunchCoordinator {
     private static var pendingRoots: [URL] = []
     private static var openBrowserWindow: ((URL) -> Void)?
+    private static var lastOpenAt: Date?
 
     /// Last focused browser folder — used by Dock menu when SwiftUI focus is unavailable.
     private(set) static var lastFocusedFolder: URL?
@@ -39,6 +40,13 @@ enum WindowLaunchCoordinator {
     }
 
     static func openNewWindow(cloning folder: URL? = nil) {
+        // Guard against reopen + WindowGroup both firing in the same gesture.
+        let now = Date()
+        if let lastOpenAt, now.timeIntervalSince(lastOpenAt) < 0.45 {
+            return
+        }
+        lastOpenAt = now
+
         let root = (folder ?? lastFocusedFolder ?? FileManager.default.homeDirectoryForCurrentUser)
             .standardizedFileURL
         openBrowserWindow?(root)
