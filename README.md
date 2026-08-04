@@ -29,7 +29,7 @@ Modern OS file explorers prioritize casual browsing over discoverability, search
 Arbor aims to be the filesystem equivalent of VS Code:
 
 - **Fast** — instant startup, Everything-class search
-- **Native** — SwiftUI on macOS first; Tauri later for Linux and Windows
+- **Native** — SwiftUI on macOS first; native UIs planned for Linux and Windows
 - **Extensible** — Rust plugins with Lua / Python / JavaScript scripting
 - **AI-first** — natural language that translates into real shell commands
 - **Cross-platform** — one Rust core, multiple UIs
@@ -55,7 +55,7 @@ Arbor aims to be the filesystem equivalent of VS Code:
 ## Architecture
 
 ```
-UI (SwiftUI / Tauri)
+UI (SwiftUI / native Linux & Windows)
         ↓
    Rust Core (FFI)
         ↓
@@ -68,7 +68,7 @@ UI (SwiftUI / Tauri)
 
 | Layer | Role |
 |-------|------|
-| **UI** | SwiftUI (macOS) → Tauri (Linux / Windows) |
+| **UI** | Native per OS — SwiftUI (macOS); Linux & Windows UIs planned |
 | **arbor-core** | Filesystem, search, watcher, metadata, preview, scheduler |
 | **arbor-ffi** | C ABI bridge for native UIs |
 | **arbor-cli** | Headless / scripting entry point |

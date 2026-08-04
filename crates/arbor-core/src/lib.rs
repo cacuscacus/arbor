@@ -1,8 +1,9 @@
 //! Arbor core library.
 //!
 //! Domain logic for filesystem access, search, watching, metadata, preview,
-//! scheduling, plugins, AI, and terminal integration. UI layers (SwiftUI, Tauri)
-//! talk to this crate through `arbor-ffi` or `arbor-cli`.
+//! scheduling, plugins, AI, and terminal integration. Native UI layers (SwiftUI
+//! on macOS; Linux and Windows planned) talk to this crate through `arbor-ffi`
+//! or `arbor-cli`.
 
 #![deny(missing_docs)]
 

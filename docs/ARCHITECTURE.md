@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  UI                                                         │
-│  SwiftUI (macOS)  ·  Tauri (Linux / Windows, future)        │
+│  Native per OS: SwiftUI (macOS) · Linux · Windows (planned) │
 └─────────────────────────────┬───────────────────────────────┘
                               │ FFI / IPC
 ┌─────────────────────────────▼───────────────────────────────┐
@@ -61,8 +61,11 @@ Scripting hosts (planned): Lua, Python, JavaScript — on top of a Rust plugin A
 
 ## AI layer (planned)
 
-Natural language → validated shell / Arbor actions.
+Two layers (see [ROADMAP.md](ROADMAP.md) Phases 2 and 5):
 
-Providers: Claude Code, Codex CLI, Cursor CLI, OpenCode, Kimi Code, Gemini CLI, Ollama, OpenAI, Anthropic, OpenRouter, custom local models.
+1. **In-window agent CLIs** — configurable runners (OpenCode, Codex, Claude Code, Kimi, Qwen, DeepSeek, custom) with cwd = current folder / selection; user watches the TUI/terminal.
+2. **Arbor-native NL actions** — natural language → validated shell / Arbor ops with confirmation.
+
+Providers / presets: Claude Code, Codex CLI, Cursor CLI, OpenCode, Kimi Code, Qwen Coder, DeepSeek, Gemini CLI, Ollama, OpenAI, Anthropic, OpenRouter, custom local models.
 
 AI suggests; the user (or automation policy) confirms destructive ops.
