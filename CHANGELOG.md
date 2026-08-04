@@ -17,6 +17,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Horizontal **split view** per tab: two folder panes side by side (`HSplitView`), each with its own navigation; **Open in Split** from folder context menus; **View → Toggle Split View** (⌘\) / **Close Split View**; sidebar and focused-scene values follow the focused pane
 - Help → **Check for Updates…** compares the installed version to the latest GitHub Release (open release page / copy `brew upgrade --cask arbor`)
 - Context menu **Open in New Window** for a selected folder (browser and Favorites sidebar)
+- **Session restore**: quit/relaunch reopens Arbor browser windows with saved frames, tabs, split pane folder URLs, focused pane, and selected tab; missing paths fall back to Home; state is written atomically to `~/Library/Application Support/Arbor/session.json`
 
 ## [1.2.0] — 2026-08-04
 

@@ -10,6 +10,8 @@ struct ArborApp: App {
             ContentView()
                 .background(WindowOpenInstaller())
         }
+        // Prefer our Codable session over system UI restoration (avoids duplicate blanks).
+        .restorationBehavior(.disabled)
         // Default toolbar style — `.unified` fights Tahoe Liquid Glass floating pills.
         .commands {
             NewWindowCommands()
