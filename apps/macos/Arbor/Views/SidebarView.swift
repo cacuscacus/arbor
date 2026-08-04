@@ -10,6 +10,7 @@ struct SidebarView: View {
     @Bindable var navigation: BrowserNavigation
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
+    var onOpenInSplit: ((URL) -> Void)? = nil
 
     @State private var draggingFavoriteID: UUID?
     @State private var dropTargetIndex: Int?
@@ -222,6 +223,11 @@ struct SidebarView: View {
         .contextMenu {
             Button("Open in New Window") {
                 WindowLaunchCoordinator.openNewWindow(cloning: item.url)
+            }
+            if let onOpenInSplit {
+                Button("Open in Split") {
+                    onOpenInSplit(item.url)
+                }
             }
             Button("Remove from Favorites", role: .destructive) {
                 withAnimation(listSpring) {
