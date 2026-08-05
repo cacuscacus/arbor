@@ -4,9 +4,8 @@ import SwiftUI
 /// Keeps a pane’s primary vertical `NSScrollView` offset in sync with `BrowserNavigation`
 /// so Back/Forward can restore Finder-like scroll positions (icon grid and list/table).
 ///
-/// `.top` is a light one-shot reset (avoids landing mid-scroll after navigate). It does
-/// **not** apply toolbar contentInsets — fighting those either parked icons under the
-/// glass or opened a large empty band. Mid-folder restores use sticky offsets only.
+/// `.top` remounts via content identity (no NSScrollView forcing). Mid-folder
+/// Back/Forward restores use sticky offsets only.
 struct FolderScrollPositionBridge: NSViewRepresentable {
     @Binding var scrollY: CGFloat
     var restoreToken: UInt
@@ -59,17 +58,11 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
                 stickyRestoreY = nil
                 guard let restore = parent.consumeRestore(), let scrollView else { return }
 
-                switch restore {
+        switch restore {
                 case .top:
-                    // One-shot only — let Liquid Glass / safe-area layout own the resting top.
-                    jumpNearTop(scrollView)
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, let scrollView = self.scrollView else { return }
-                        // Only nudge again if we're still clearly mid-document from the previous folder.
-                        if Self.currentScrollY(scrollView) > 8 {
-                            self.jumpNearTop(scrollView)
-                        }
-                    }
+                    // Natural top comes from remounting browser content (`.id(path)`).
+                    // Never force raw y=0 / inset math — both look wrong under Liquid Glass.
+                    parent.scrollY = 0
 
                 case .offset(let y):
                     stickyRestoreY = max(0, y)
@@ -77,7 +70,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
                     DispatchQueue.main.async { [weak self] in
                         self?.applyStickyOffset()
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                         self?.stickyRestoreY = nil
                     }
                 }
@@ -85,13 +78,6 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
             }
 
             applyStickyOffset()
-        }
-
-        private func jumpNearTop(_ scrollView: NSScrollView) {
-            isApplyingRestore = true
-            Self.setScrollY(scrollView, 0)
-            parent?.scrollY = 0
-            isApplyingRestore = false
         }
 
         private func applyStickyOffset() {

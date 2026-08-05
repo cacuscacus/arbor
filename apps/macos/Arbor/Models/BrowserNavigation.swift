@@ -53,7 +53,9 @@ final class BrowserNavigation {
         forwardStack.removeAll()
         current = target
         scrollY = 0
-        requestScrollRestore(.top)
+        // Fresh folder: content `.id(path)` remounts at the system resting top.
+        // Do not force NSScrollView y=0 — that parks icons under the toolbar glass.
+        pendingScrollRestore = nil
     }
 
     @discardableResult

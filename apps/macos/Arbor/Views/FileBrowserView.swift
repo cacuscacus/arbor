@@ -92,8 +92,11 @@ struct FileBrowserView: View {
             // Keep content swaps (browse ↔ search results) inside this slot so the
             // floating search overlay is NOT recreated with them — that was
             // stealing TextField focus after the first character.
+            // `.id(path)` remounts the scroller at the system resting top when the
+            // folder changes (Finder-like), without forcing raw NSScrollView y=0.
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .id(isSearchActive ? "search:\(searchScope)" : path.path)
 
             if !isSearchActive {
                 Divider()
