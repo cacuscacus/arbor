@@ -113,28 +113,19 @@ struct ContentView: View {
             // Keep every tab's browser mounted so @State (selection, view mode, …)
             // survives tab switches; only the active tab receives hits / focus values.
             // Within a tab, both split panes stay mounted for the same reason.
-            Group {
-                let stack = ZStack {
-                    ForEach(tabs) { tab in
-                        let active = tab.id == selectedTabID
-                        TabDetailView(
-                            tab: tab,
-                            favorites: favorites,
-                            dragState: dragState,
-                            isActive: active
-                        )
-                        .opacity(active ? 1 : 0)
-                        .allowsHitTesting(active)
-                        .accessibilityHidden(!active)
-                        .zIndex(active ? 1 : 0)
-                    }
-                }
-                // HSplitView children are separate AppKit surfaces; without flattening,
-                // Liquid Glass / `.glassEffect` only blurs the leading pane (right stays sharp).
-                if selectedTab?.isSplit == true {
-                    stack.compositingGroup()
-                } else {
-                    stack
+            ZStack {
+                ForEach(tabs) { tab in
+                    let active = tab.id == selectedTabID
+                    TabDetailView(
+                        tab: tab,
+                        favorites: favorites,
+                        dragState: dragState,
+                        isActive: active
+                    )
+                    .opacity(active ? 1 : 0)
+                    .allowsHitTesting(active)
+                    .accessibilityHidden(!active)
+                    .zIndex(active ? 1 : 0)
                 }
             }
             // Overlay (not a layout sibling) so folder icons *and* the HSplitView
@@ -360,6 +351,8 @@ private struct TabDetailView: View {
                         )
                     }
                 }
+                // Ensure both columns inherit soft top edges (not only the leading one).
+                .scrollEdgeEffectStyle(.soft, for: .top)
             } else if let pane = tab.panes.first {
                 PaneBrowserHost(
                     tab: tab,
