@@ -90,8 +90,8 @@ Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0)
 - ✓ **New Window** from File menu (⌘N) and Dock right-click menu; clones the frontmost / last-focused folder
 - ✓ Independent windows (separate navigation / selection / view state; shared favorites)
 - ✓ Dock click with no open windows restores a **single** window (reopen vs SwiftUI default de-duplicated)
-- ⬚ Open window from a selected folder (“Open in New Window”)
-- ◐ Persist per-window: frame (position/size), tab pane cwds, focused pane, selected tab (not yet: sidebar width, view mode, sort, terminal visibility)
+- ✓ Open window from a selected folder (“Open in New Window”)
+- ◐ Persist per-window: frame (position/size), tab pane cwds, focused pane, selected tab (not yet: sidebar width, view mode, sort, richer terminal session fields)
 - ⬚ Persist global: favorites, tool presets, default agent, appearance
 - ✓ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
 - ✓ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
@@ -100,8 +100,8 @@ Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0)
 
 Finder-style tabs inside a window so one frame can host multiple folders:
 
-- ◐ Tab bar with open / close; ⌘T new tab, ⌘W close tab (window when last tab) — reorder still planned
-- ◐ Each tab owns its own navigation stack; selection and view mode preserved while switching (inactive browsers stay mounted)
+- ✓ Tab bar with open / close; ⌘T new tab, ⌘W close tab (window when last tab); Finder-style floating pill island — reorder still planned
+- ✓ Each tab owns its own navigation stack; selection and view mode preserved while switching (inactive browsers stay mounted)
 - ⬚ Drag folder onto tab bar / “Open in New Tab”
 - ⬚ Optional: merge all windows into tabs / move tab to new window
 
@@ -193,7 +193,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
 - ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
-- ✓ [v1.2.0](https://github.com/cacuscacus/arbor/releases/tag/v1.2.0) — Help → Release History from [`CHANGELOG.md`](../CHANGELOG.md)
+- ✓ [v1.3.0](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0) — tabs, split view, session restore, embedded terminal, Check for Updates, Open in New Window
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -207,10 +207,9 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.0.0 browser MVP
 ✓ v1.1.0 multi-window (New Window / Dock)
 ✓ v1.2.0 Help → Release History (CHANGELOG.md)
-✓ main (unreleased): Open in New Window, Check for Updates,
-  tabs, split view, session restore, embedded terminal
-  → next release candidate: v1.3.0 (after smoke test)
+✓ v1.3.0 tabs, split view, session restore, embedded terminal,
+  Check for Updates, Open in New Window
   → agent runners → Quick diff / Git → remotes → Linux / Windows
 ```
 
-All six hybrid-branch slices are merged to `main`. **Do not cut a GitHub/Homebrew release until you smoke-test and confirm.** Remaining polish: richer session fields (view mode / sort / sidebar / terminal visibility), agent runners.
+Remaining polish: richer session fields (view mode / sort / sidebar / terminal visibility), agent runners.
