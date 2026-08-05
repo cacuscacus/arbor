@@ -113,19 +113,28 @@ struct ContentView: View {
             // Keep every tab's browser mounted so @State (selection, view mode, …)
             // survives tab switches; only the active tab receives hits / focus values.
             // Within a tab, both split panes stay mounted for the same reason.
-            ZStack {
-                ForEach(tabs) { tab in
-                    let active = tab.id == selectedTabID
-                    TabDetailView(
-                        tab: tab,
-                        favorites: favorites,
-                        dragState: dragState,
-                        isActive: active
-                    )
-                    .opacity(active ? 1 : 0)
-                    .allowsHitTesting(active)
-                    .accessibilityHidden(!active)
-                    .zIndex(active ? 1 : 0)
+            Group {
+                let stack = ZStack {
+                    ForEach(tabs) { tab in
+                        let active = tab.id == selectedTabID
+                        TabDetailView(
+                            tab: tab,
+                            favorites: favorites,
+                            dragState: dragState,
+                            isActive: active
+                        )
+                        .opacity(active ? 1 : 0)
+                        .allowsHitTesting(active)
+                        .accessibilityHidden(!active)
+                        .zIndex(active ? 1 : 0)
+                    }
+                }
+                // HSplitView children are separate AppKit surfaces; without flattening,
+                // Liquid Glass / `.glassEffect` only blurs the leading pane (right stays sharp).
+                if selectedTab?.isSplit == true {
+                    stack.compositingGroup()
+                } else {
+                    stack
                 }
             }
             // Overlay (not a layout sibling) so folder icons *and* the HSplitView
