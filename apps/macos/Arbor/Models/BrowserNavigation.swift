@@ -61,7 +61,9 @@ final class BrowserNavigation {
     @discardableResult
     func goBack() -> URL? {
         guard let previous = backStack.popLast() else { return nil }
-        forwardStack.append(FolderHistoryEntry(url: current, scrollY: scrollY))
+        // Snapshot before any view updates can publish a remounted scroller’s y=0.
+        let leaving = FolderHistoryEntry(url: current, scrollY: scrollY)
+        forwardStack.append(leaving)
         current = previous.url
         scrollY = previous.scrollY
         requestScrollRestore(previous.scrollY < 1 ? .top : .offset(previous.scrollY))
@@ -71,7 +73,8 @@ final class BrowserNavigation {
     @discardableResult
     func goForward() -> URL? {
         guard let next = forwardStack.popLast() else { return nil }
-        backStack.append(FolderHistoryEntry(url: current, scrollY: scrollY))
+        let leaving = FolderHistoryEntry(url: current, scrollY: scrollY)
+        backStack.append(leaving)
         current = next.url
         scrollY = next.scrollY
         requestScrollRestore(next.scrollY < 1 ? .top : .offset(next.scrollY))

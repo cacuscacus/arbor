@@ -4,8 +4,8 @@ import SwiftUI
 /// Keeps a pane’s primary vertical `NSScrollView` offset in sync with `BrowserNavigation`
 /// so Back/Forward can restore Finder-like scroll positions (icon grid and list/table).
 ///
-/// `.top` remounts via content identity (no NSScrollView forcing). Mid-folder
-/// Back/Forward restores use sticky offsets only.
+/// Mid-folder restores wait until a scroller exists before consuming the pending offset —
+/// otherwise Forward (and sometimes Back) discarded restore when `.id(path)` remount lagged.
 struct FolderScrollPositionBridge: NSViewRepresentable {
     @Binding var scrollY: CGFloat
     var restoreToken: UInt
@@ -45,7 +45,8 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
         func attach(near probe: NSView) {
             guard let found = Self.primaryVerticalScrollView(near: probe) else { return }
             if scrollView !== found {
-                detach()
+                // Keep stickyRestoreY across scroller swaps — detach observers only.
+                stopObserving()
                 scrollView = found
                 startObserving(found)
             }
@@ -53,15 +54,19 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
 
         func applyRestoreIfNeeded() {
             guard let parent else { return }
+
             if parent.restoreToken != lastRestoreToken {
+                // Critical: do not consume / advance the token until a scroller is attached.
+                // Forward often hits this path one frame before `.id(path)` remounts content.
+                guard scrollView != nil else { return }
+
                 lastRestoreToken = parent.restoreToken
                 stickyRestoreY = nil
-                guard let restore = parent.consumeRestore(), let scrollView else { return }
 
-        switch restore {
+                guard let restore = parent.consumeRestore() else { return }
+
+                switch restore {
                 case .top:
-                    // Natural top comes from remounting browser content (`.id(path)`).
-                    // Never force raw y=0 / inset math — both look wrong under Liquid Glass.
                     parent.scrollY = 0
 
                 case .offset(let y):
@@ -70,7 +75,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
                     DispatchQueue.main.async { [weak self] in
                         self?.applyStickyOffset()
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                         self?.stickyRestoreY = nil
                     }
                 }
@@ -89,6 +94,12 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
         }
 
         func detach() {
+            stopObserving()
+            scrollView = nil
+            stickyRestoreY = nil
+        }
+
+        private func stopObserving() {
             if let boundsObserver {
                 NotificationCenter.default.removeObserver(boundsObserver)
             }
@@ -97,8 +108,6 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
             }
             boundsObserver = nil
             liveObserver = nil
-            scrollView = nil
-            stickyRestoreY = nil
         }
 
         private func startObserving(_ scroll: NSScrollView) {
