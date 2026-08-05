@@ -408,15 +408,10 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
     private func chromeBody(content: Content) -> some View {
         @Bindable var pane = tab.focusedPane
         let navigation = pane.navigation
-        let title: String = {
-            let url = navigation.current
-            if url.path == "/" { return "Macintosh HD" }
-            let name = url.lastPathComponent
-            return name.isEmpty ? url.path : name
-        }()
 
         content
-            .navigationTitle(title)
+            // Plain string for the window chrome; visual split emphasis is the toolbar label.
+            .navigationTitle(tab.title)
             // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass.
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
@@ -463,6 +458,10 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
 
                 ToolbarSpacer(.flexible)
 
+                ToolbarItem(placement: .principal) {
+                    SplitFolderTitleLabel(tab: tab, style: .toolbar)
+                }
+
                 ToolbarItemGroup(placement: .primaryAction) {
                     Picker("View", selection: $pane.displaySettings.viewMode) {
                         ForEach(BrowserViewMode.allCases) { mode in
@@ -486,6 +485,68 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
     }
 }
 
+/// Folder title for toolbar / tabs — split shows `left | right` with focus emphasis.
+private struct SplitFolderTitleLabel: View {
+    @Bindable var tab: BrowserTab
+    var style: Style = .toolbar
+    /// When false (unselected tab), avoid competing emphasis and don't steal clicks for pane focus.
+    var allowsPaneFocusClicks: Bool = true
+
+    enum Style {
+        case toolbar
+        case tab
+
+        var font: Font {
+            switch self {
+            case .toolbar: return .headline
+            case .tab: return .subheadline
+            }
+        }
+    }
+
+    var body: some View {
+        if tab.isSplit, tab.panes.count >= 2 {
+            HStack(spacing: style == .tab ? 4 : 6) {
+                paneName(tab.panes[0])
+                Text("|")
+                    .font(style.font.weight(.regular))
+                    .foregroundStyle(.tertiary)
+                paneName(tab.panes[1])
+            }
+            .lineLimit(1)
+            .help(tab.title)
+        } else {
+            Text(tab.focusedPane.folderDisplayName)
+                .font(style.font.weight(style == .toolbar ? .semibold : .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .help(tab.focusedPane.navigation.current.path)
+        }
+    }
+
+    @ViewBuilder
+    private func paneName(_ pane: BrowserPane) -> some View {
+        let focused = pane.id == tab.focusedPaneID
+        let label = Text(pane.folderDisplayName)
+            .font(style.font.weight(focused ? .semibold : .regular))
+            .foregroundStyle(focused ? Color.primary : Color.secondary)
+            .lineLimit(1)
+
+        if allowsPaneFocusClicks, tab.isSplit {
+            Button {
+                tab.focusPane(pane.id)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .help(focused ? pane.navigation.current.path : "Focus \(pane.folderDisplayName)")
+        } else {
+            label
+                .help(pane.navigation.current.path)
+        }
+    }
+}
+
 /// One tab inside the floating island — selected state is a Finder-like inner pill.
 private struct TabBarItem: View {
     @Bindable var tab: BrowserTab
@@ -497,11 +558,13 @@ private struct TabBarItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(tab.title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            SplitFolderTitleLabel(
+                tab: tab,
+                style: .tab,
+                allowsPaneFocusClicks: isSelected
+            )
+            .opacity(isSelected ? 1 : 0.85)
+            .frame(maxWidth: .infinity)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -523,11 +586,13 @@ private struct TabBarItem: View {
         .contentShape(Capsule(style: .continuous))
         .onTapGesture(perform: onSelect)
         .onHover { isHovering = $0 }
-        .help(tab.navigation.current.path)
+        .help(tab.title)
         .animation(.snappy(duration: 0.15), value: isSelected)
         .animation(.snappy(duration: 0.12), value: isHovering)
+        .animation(.snappy(duration: 0.15), value: tab.focusedPaneID)
     }
 }
+
 
 #Preview {
     ContentView(rootDirectory: FileManager.default.homeDirectoryForCurrentUser)

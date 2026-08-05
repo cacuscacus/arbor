@@ -30,6 +30,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Window toolbar attaches on the **tab detail container** (outside `HSplitView`) so split focus no longer flattens Liquid Glass into an opaque bar with a hard horizontal divider
 - Split panes use the **native soft scroll-edge** underlap (same effect as non-split toolbar) via `.scrollEdgeEffectStyle(.soft)` and enabling overlay vertical scrollers so the trailing `HSplitView` column receives it too
 
+### Changed
+
+- Split mode titles show both pane folders as `left | right` (toolbar + tab pills), with the focused side emphasized; clicking a name focuses that pane
+
 ## [1.2.0] — 2026-08-04
 
 ### Added

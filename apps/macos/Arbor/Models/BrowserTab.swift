@@ -28,6 +28,14 @@ final class BrowserPane: Identifiable {
         navigation = BrowserNavigation(initial: root)
     }
 
+    /// Short folder label for toolbar / tab titles (volume root → friendly name).
+    var folderDisplayName: String {
+        let url = navigation.current
+        if url.path == "/" { return "Macintosh HD" }
+        let name = url.lastPathComponent
+        return name.isEmpty ? url.path : name
+    }
+
     func sendChrome(_ command: BrowserPaneChromeCommand) {
         pendingChromeCommand = command
         chromeCommandToken &+= 1
@@ -73,15 +81,16 @@ final class BrowserTab: Identifiable {
         panes.first { $0.id == focusedPaneID } ?? panes[0]
     }
 
-    /// Navigation for the focused pane (sidebar / tab title / new-tab clone).
+    /// Navigation for the focused pane (sidebar / new-tab clone).
     var navigation: BrowserNavigation { focusedPane.navigation }
 
-    /// Folder name for the tab bar (volume root shows a friendly label).
+    /// Plain title for accessibility / window title fallback.
+    /// Split tabs list both pane folders: `left | right`.
     var title: String {
-        let url = navigation.current
-        if url.path == "/" { return "Macintosh HD" }
-        let name = url.lastPathComponent
-        return name.isEmpty ? url.path : name
+        if isSplit {
+            return panes.map(\.folderDisplayName).joined(separator: " | ")
+        }
+        return focusedPane.folderDisplayName
     }
 
     func focusPane(_ id: BrowserPane.ID) {
