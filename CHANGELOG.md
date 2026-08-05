@@ -28,7 +28,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 - Tabs are a **floating glass island** of Finder-like pills (full-width distribution + trailing **+**); pills hide when only one tab remains (floating **+** stays); island overlays split so the divider is diffused under the chrome like folder icons
 - Tab island uses a true **capsule** shape (horizontal pill), not a rounded rectangle
 - Window toolbar attaches on the **tab detail container** (outside `HSplitView`) so split focus no longer flattens Liquid Glass into an opaque bar with a hard horizontal divider
-- Split mode draws a **per-pane** soft underlap blur that extends into the toolbar band (native scroll-edge blur only sticks to the leading column; a shared overlay cannot sample the trailing pane)
+- Split mode uses a **hard** native scroll edge and a **per-pane** soft underlap overlay (extends into the toolbar) so both columns match without stacking the system edge blur on the leading pane only
 
 ## [1.2.0] — 2026-08-04
 

@@ -2,6 +2,19 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// When true, file browsers use a hard native top scroll edge (split mode); the soft
+/// look comes only from `SplitToolbarUnderlapBlur`.
+enum SuppressSoftTopScrollEdgeKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var suppressSoftTopScrollEdge: Bool {
+        get { self[SuppressSoftTopScrollEdgeKey.self] }
+        set { self[SuppressSoftTopScrollEdgeKey.self] = newValue }
+    }
+}
+
 struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
     let entries: [FileEntry]
     @Binding var selection: Set<URL>
@@ -19,6 +32,8 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
     var onCancelRename: () -> Void
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
+
+    @Environment(\.suppressSoftTopScrollEdge) private var suppressSoftTopScrollEdge
 
     var body: some View {
         // Row-based Table so `.itemProvider` applies to the *entire* row.
@@ -157,6 +172,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
             )
         }
         .focusEffectDisabled()
+        .scrollEdgeEffectStyle(suppressSoftTopScrollEdge ? .hard : .soft, for: .top)
     }
 }
 
@@ -174,6 +190,8 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     var onCancelRename: () -> Void
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
+
+    @Environment(\.suppressSoftTopScrollEdge) private var suppressSoftTopScrollEdge
 
     @State private var anchorID: URL?
     @State private var lastClickID: URL?
@@ -289,6 +307,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
         }
         .background(.background)
         .focusEffectDisabled()
+        .scrollEdgeEffectStyle(suppressSoftTopScrollEdge ? .hard : .soft, for: .top)
         .onChange(of: entries.map(\.id)) { _, ids in
             let valid = Set(ids)
             itemHitAreas = itemHitAreas.filter { valid.contains($0.key) }

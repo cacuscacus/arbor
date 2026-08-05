@@ -1,34 +1,42 @@
 import AppKit
 import SwiftUI
 
-/// Soft top underlap drawn **per split pane**.
+/// Soft top underlap drawn **per split pane** (only effect under the toolbar in spit).
 ///
-/// Native scroll-edge blur only attaches to the leading `HSplitView` column, and a
-/// single overlay spanning the split cannot sample the trailing column. Each pane
-/// blurs its own content; `.ignoresSafeArea(.top)` lifts the fade into the toolbar band.
+/// Native scroll-edge / Liquid Glass underlap only soft-blurs the leading `HSplitView`
+/// column and would stack with this overlay. Split panes use a hard native edge and
+/// this fade alone so both sides match without a double blur.
 struct SplitToolbarUnderlapBlur: View {
-    /// Tall enough to cover the toolbar underlap + a soft fade into the icon grid.
-    var height: CGFloat = 120
+    /// Cover the toolbar band and ease into the first icon row.
+    var height: CGFloat = 96
 
     var body: some View {
-        WithinWindowBlurView()
-            .frame(maxWidth: .infinity)
-            .frame(height: height, alignment: .top)
-            .mask {
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black.opacity(0.95), location: 0.28),
-                        .init(color: .black.opacity(0.55), location: 0.55),
-                        .init(color: .black.opacity(0.18), location: 0.78),
-                        .init(color: .clear, location: 1),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        ZStack {
+            // Primary: within-window blur of this pane’s icons.
+            WithinWindowBlurView()
+
+            // Soft Liquid Glass wash so it reads closer to the system toolbar edge.
+            Rectangle()
+                .fill(.clear)
+                .glassEffect(.regular, in: .rect(cornerRadius: 0))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height, alignment: .top)
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black.opacity(0.9), location: 0.22),
+                    .init(color: .black.opacity(0.45), location: 0.5),
+                    .init(color: .black.opacity(0.12), location: 0.78),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -36,17 +44,19 @@ struct SplitToolbarUnderlapBlur: View {
 private struct WithinWindowBlurView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .headerView
+        // Lighter than `.headerView` so it doesn’t muddy icons as much as a double blur.
+        view.material = .toolTip
         view.blendingMode = .withinWindow
         view.state = .active
-        view.isEmphasized = true
+        view.isEmphasized = false
         view.wantsLayer = true
         return view
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = .headerView
+        nsView.material = .toolTip
         nsView.blendingMode = .withinWindow
         nsView.state = .active
+        nsView.isEmphasized = false
     }
 }

@@ -116,7 +116,8 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
-        .scrollEdgeEffectHidden(suppressTopScrollEdge, for: .top)
+        .scrollEdgeEffectStyle(suppressTopScrollEdge ? .hard : .soft, for: .top)
+        .environment(\.suppressSoftTopScrollEdge, suppressTopScrollEdge)
         // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
         // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(
