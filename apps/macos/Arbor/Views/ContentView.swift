@@ -347,15 +347,10 @@ private struct TabDetailView: View {
                             pane: pane,
                             favorites: favorites,
                             dragState: dragState,
-                            isActive: isActive && tab.focusedPaneID == pane.id
+                            isActive: isActive && tab.focusedPaneID == pane.id,
+                            usesSplitToolbarUnderlap: true
                         )
-                        // Native soft-edge only sticks to the leading column — hide both
-                        // and use `SplitToolbarUnderlapBlur` so left/right match.
-                        .scrollEdgeEffectHidden(true, for: .top)
                     }
-                }
-                .overlay(alignment: .top) {
-                    SplitToolbarUnderlapBlur()
                 }
             } else if let pane = tab.panes.first {
                 PaneBrowserHost(
@@ -363,7 +358,8 @@ private struct TabDetailView: View {
                     pane: pane,
                     favorites: favorites,
                     dragState: dragState,
-                    isActive: isActive
+                    isActive: isActive,
+                    usesSplitToolbarUnderlap: false
                 )
             }
         }
@@ -377,6 +373,8 @@ private struct PaneBrowserHost: View {
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
     var isActive: Bool
+    /// Split columns need a local soft underlap — native scroll-edge blur only sticks to the leading column.
+    var usesSplitToolbarUnderlap: Bool
 
     var body: some View {
         FileBrowserView(
@@ -384,10 +382,18 @@ private struct PaneBrowserHost: View {
             favorites: favorites,
             dragState: dragState,
             isActive: isActive,
+            suppressTopScrollEdge: usesSplitToolbarUnderlap,
             onOpenInSplit: { url in
                 tab.openInSplit(folder: url)
             }
         )
+        .overlay(alignment: .top) {
+            if usesSplitToolbarUnderlap {
+                SplitToolbarUnderlapBlur()
+                    // Reach into the window toolbar band above the split content.
+                    .ignoresSafeArea(edges: .top)
+            }
+        }
         .simultaneousGesture(
             TapGesture().onEnded {
                 tab.focusPane(pane.id)

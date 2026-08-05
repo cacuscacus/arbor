@@ -1,21 +1,26 @@
 import AppKit
 import SwiftUI
 
-/// Full-width soft underlap for split detail — `HSplitView` only attaches native
-/// scroll-edge blur to the leading column, so we draw one shared within-window blur.
+/// Soft top underlap drawn **per split pane**.
+///
+/// Native scroll-edge blur only attaches to the leading `HSplitView` column, and a
+/// single overlay spanning the split cannot sample the trailing column. Each pane
+/// blurs its own content; `.ignoresSafeArea(.top)` lifts the fade into the toolbar band.
 struct SplitToolbarUnderlapBlur: View {
-    var height: CGFloat = 72
+    /// Tall enough to cover the toolbar underlap + a soft fade into the icon grid.
+    var height: CGFloat = 120
 
     var body: some View {
         WithinWindowBlurView()
             .frame(maxWidth: .infinity)
-            .frame(height: height)
+            .frame(height: height, alignment: .top)
             .mask {
                 LinearGradient(
                     stops: [
                         .init(color: .black, location: 0),
-                        .init(color: .black.opacity(0.92), location: 0.35),
-                        .init(color: .black.opacity(0.45), location: 0.7),
+                        .init(color: .black.opacity(0.95), location: 0.28),
+                        .init(color: .black.opacity(0.55), location: 0.55),
+                        .init(color: .black.opacity(0.18), location: 0.78),
                         .init(color: .clear, location: 1),
                     ],
                     startPoint: .top,
@@ -27,7 +32,7 @@ struct SplitToolbarUnderlapBlur: View {
     }
 }
 
-/// Blurs sibling content beneath it (both split panes) without flattening the window chrome.
+/// Blurs sibling content beneath it within the same pane.
 private struct WithinWindowBlurView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()

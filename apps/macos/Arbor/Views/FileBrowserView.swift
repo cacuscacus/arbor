@@ -7,6 +7,8 @@ struct FileBrowserView: View {
     var dragState: FileDragState
     /// When multiple tab / split browsers stay mounted, only the focused pane publishes scene focus values.
     var isActive: Bool = true
+    /// Split panes hide native top scroll-edge blur (leading-only) and use `SplitToolbarUnderlapBlur`.
+    var suppressTopScrollEdge: Bool = false
     /// Opens a folder in the other split pane (creates a split if needed).
     var onOpenInSplit: ((URL) -> Void)? = nil
 
@@ -114,6 +116,7 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
+        .scrollEdgeEffectHidden(suppressTopScrollEdge, for: .top)
         // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
         // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(
