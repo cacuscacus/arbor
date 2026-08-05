@@ -32,7 +32,7 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ### Changed
 
-- Split mode titles show both pane folders as `left | right` (toolbar + tab pills), with the focused side emphasized; clicking a name focuses that pane
+- Split mode titles show both pane folders as `left | right` (toolbar + tab pills) with the focused side semibold and the other italic/secondary; the styled label sits next to the nav controls (no center title pill); clicking a name focuses that pane
 
 ## [1.2.0] — 2026-08-04
 

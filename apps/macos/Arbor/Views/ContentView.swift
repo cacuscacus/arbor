@@ -410,8 +410,10 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
         let navigation = pane.navigation
 
         content
-            // Plain string for the window chrome; visual split emphasis is the toolbar label.
+            // Keep a plain window title for Mission Control / the Window menu, but hide
+            // the system toolbar title string (it can't italicize/emphasize one side).
             .navigationTitle(tab.title)
+            .toolbar(removing: .title)
             // Do not set `.toolbarBackground(...)` — custom materials flatten Liquid Glass.
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
@@ -456,11 +458,13 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
                     }
                 }
 
-                ToolbarSpacer(.flexible)
-
-                ToolbarItem(placement: .principal) {
+                // Sit next to chrome buttons (not `.principal` — that floated a center pill).
+                ToolbarItem(placement: .navigation) {
                     SplitFolderTitleLabel(tab: tab, style: .toolbar)
                 }
+                .sharedBackgroundVisibility(.hidden)
+
+                ToolbarSpacer(.flexible)
 
                 ToolbarItemGroup(placement: .primaryAction) {
                     Picker("View", selection: $pane.displaySettings.viewMode) {
@@ -527,8 +531,9 @@ private struct SplitFolderTitleLabel: View {
     @ViewBuilder
     private func paneName(_ pane: BrowserPane) -> some View {
         let focused = pane.id == tab.focusedPaneID
+        // Focused: semibold primary. Unfocused: italic + secondary (readable focus cue).
         let label = Text(pane.folderDisplayName)
-            .font(style.font.weight(focused ? .semibold : .regular))
+            .font(focused ? style.font.weight(.semibold) : style.font.weight(.regular).italic())
             .foregroundStyle(focused ? Color.primary : Color.secondary)
             .lineLimit(1)
 
