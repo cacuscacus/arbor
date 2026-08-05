@@ -114,10 +114,6 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
-        // Soft scroll-edge under the toolbar on every pane. In HSplitView the trailing
-        // pane otherwise falls back to a hard edge (opaque bar + hairline), while the
-        // leading pane keeps the soft Liquid Glass blur.
-        .scrollEdgeEffectStyle(.soft, for: .top)
         // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
         // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(

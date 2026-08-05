@@ -349,10 +349,14 @@ private struct TabDetailView: View {
                             dragState: dragState,
                             isActive: isActive && tab.focusedPaneID == pane.id
                         )
+                        // Native soft-edge only sticks to the leading column — hide both
+                        // and use `SplitToolbarUnderlapBlur` so left/right match.
+                        .scrollEdgeEffectHidden(true, for: .top)
                     }
                 }
-                // Ensure both columns inherit soft top edges (not only the leading one).
-                .scrollEdgeEffectStyle(.soft, for: .top)
+                .overlay(alignment: .top) {
+                    SplitToolbarUnderlapBlur()
+                }
             } else if let pane = tab.panes.first {
                 PaneBrowserHost(
                     tab: tab,
