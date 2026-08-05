@@ -119,6 +119,19 @@ struct FileBrowserView: View {
         // columns get the effect too (AppKit often skips it without a vertical scroller).
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background(ScrollEdgeEffectEnabler())
+        .background {
+            // Finder-like Back/Forward scroll memory (skip while search results are shown).
+            if !isSearchActive {
+                FolderScrollPositionBridge(
+                    scrollY: Binding(
+                        get: { navigation.scrollY },
+                        set: { navigation.noteScrollY($0) }
+                    ),
+                    restoreToken: navigation.scrollRestoreToken,
+                    consumeRestore: { navigation.consumePendingScrollRestore() }
+                )
+            }
+        }
         // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
         // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(

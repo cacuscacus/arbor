@@ -34,6 +34,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 - Split mode titles show both pane folders as `left | right` (toolbar + tab pills) with the focused side semibold and the other italic/secondary; the styled label sits next to the nav controls (no center title pill); clicking a name focuses that pane
 
+### Changed
+
+- Back/Forward keeps each folder’s **vertical scroll position** (icon grid and list) per pane history, Finder-style
+
 ## [1.2.0] — 2026-08-04
 
 ### Added
