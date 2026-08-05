@@ -194,6 +194,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
 - ✓ [v1.3.0](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0) — tabs, split view, session restore, embedded terminal, Check for Updates, Open in New Window
+- ✓ [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1) — split DnD onto pane root + cross-pane listing refresh without scroll reset
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -209,6 +210,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.2.0 Help → Release History (CHANGELOG.md)
 ✓ v1.3.0 tabs, split view, session restore, embedded terminal,
   Check for Updates, Open in New Window
+✓ v1.3.1 split DnD / listing refresh fixes
   → agent runners → Quick diff / Git → remotes → Linux / Windows
 ```
 

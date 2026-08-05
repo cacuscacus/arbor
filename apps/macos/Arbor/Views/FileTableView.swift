@@ -10,6 +10,8 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
     @Binding var renameDraft: String
     var settings: BrowserDisplaySettings
     var relativeRoot: URL
+    /// Drop destination for empty space / non-folder rows (pane's current folder).
+    var currentFolder: URL?
     var showsLocation: Bool
     var dragState: FileDragState
     var onOpenRow: (FileEntry) -> Void
@@ -139,6 +141,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
         .contextMenu {
             emptySpaceMenu()
         }
+        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
             TableInteractionInstaller(
@@ -167,6 +170,8 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     @Binding var renamingURL: URL?
     @Binding var renameDraft: String
     var iconMetrics: IconViewMetrics
+    /// Drop destination for empty canvas / non-folder icons (pane's current folder).
+    var currentFolder: URL?
     var dragState: FileDragState
     var onOpen: (FileEntry) -> Void
     var onTransfer: ([URL], URL, FileTransferOperation) -> Void
@@ -216,6 +221,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
                         )
                         .contentShape(Rectangle())
                         .contextMenu { emptySpaceMenu() }
+                        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
                         .onTapGesture(count: 1) {
                             clearSelectionIfNeeded()
                         }
@@ -288,6 +294,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
                 }
             }
         }
+        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background(.background)
         .focusEffectDisabled()
@@ -589,6 +596,28 @@ extension View {
                     destination: entry.id,
                     dragState: dragState,
                     isTargeted: isTargeted,
+                    onTransfer: onTransfer
+                )
+            )
+        } else {
+            self
+        }
+    }
+
+    /// Accept drops into the open folder (empty space / non-folder chrome).
+    @ViewBuilder
+    fileprivate func dropIntoCurrentFolder(
+        _ folder: URL?,
+        dragState: FileDragState,
+        onTransfer: @escaping ([URL], URL, FileTransferOperation) -> Void
+    ) -> some View {
+        if let folder {
+            self.onDrop(
+                of: [.fileURL],
+                delegate: FolderDropDelegate(
+                    destination: folder,
+                    dragState: dragState,
+                    isTargeted: nil,
                     onTransfer: onTransfer
                 )
             )

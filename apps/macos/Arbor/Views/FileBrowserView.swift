@@ -164,6 +164,9 @@ struct FileBrowserView: View {
                 listFocused = true
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: BrowserListingDidChange.name)) { note in
+            handleRemoteListingChange(BrowserListingDidChange.folders(from: note))
+        }
         .onChange(of: navigation.current) { _, _ in
             cancelRename()
             selection = []
@@ -348,6 +351,15 @@ struct FileBrowserView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .contextMenu { emptySpaceContextMenu }
+            .onDrop(
+                of: [.fileURL],
+                delegate: FolderDropDelegate(
+                    destination: path,
+                    dragState: dragState,
+                    isTargeted: nil,
+                    onTransfer: handleTransfer
+                )
+            )
         } else {
             browserBody(entries: visibleEntries, showsLocation: false)
         }
@@ -382,6 +394,7 @@ struct FileBrowserView: View {
                 renameDraft: $renameDraft,
                 settings: displaySettings,
                 relativeRoot: isSearchActive ? relativeRoot : path,
+                currentFolder: isSearchActive ? nil : path,
                 showsLocation: showsLocation,
                 dragState: dragState,
                 onOpenRow: { entry in
@@ -402,6 +415,7 @@ struct FileBrowserView: View {
                 renamingURL: $renamingURL,
                 renameDraft: $renameDraft,
                 iconMetrics: displaySettings.iconMetrics,
+                currentFolder: isSearchActive ? nil : path,
                 dragState: dragState,
                 onOpen: { entry in
                     cancelRename()
@@ -742,6 +756,14 @@ struct FileBrowserView: View {
             reload()
             selection = newSelection
         }
+
+        var affected = [destination]
+        if operation == .move {
+            affected.append(contentsOf: result.transferred.map {
+                $0.from.deletingLastPathComponent()
+            })
+        }
+        BrowserListingDidChange.post(folders: affected)
     }
 
     private func beginCreateItem(_ kind: CreateItemKind) {
@@ -769,6 +791,7 @@ struct FileBrowserView: View {
             undoStack.register(.create(url: created, isDirectory: isDirectory))
             reload()
             selection = [created]
+            BrowserListingDidChange.post(folders: [path])
         } catch {
             self.createDialog = nil
             createErrorMessage = error.localizedDescription
@@ -781,7 +804,10 @@ struct FileBrowserView: View {
         if let error = result.errorMessage {
             undoErrorMessage = error
         }
-        refreshAfterUndoRedo(selecting: result.restoredSelection)
+        refreshAfterUndoRedo(
+            selecting: result.restoredSelection,
+            affectedFolders: result.affectedFolders
+        )
     }
 
     private func performRedo() {
@@ -790,10 +816,13 @@ struct FileBrowserView: View {
         if let error = result.errorMessage {
             undoErrorMessage = error
         }
-        refreshAfterUndoRedo(selecting: result.restoredSelection)
+        refreshAfterUndoRedo(
+            selecting: result.restoredSelection,
+            affectedFolders: result.affectedFolders
+        )
     }
 
-    private func refreshAfterUndoRedo(selecting newSelection: Set<URL>) {
+    private func refreshAfterUndoRedo(selecting newSelection: Set<URL>, affectedFolders: [URL]) {
         cancelRename()
         if isSearchActive {
             scheduleSearch()
@@ -801,6 +830,10 @@ struct FileBrowserView: View {
             reload()
         }
         selection = newSelection
+        var folders = affectedFolders
+        folders.append(path)
+        folders.append(contentsOf: newSelection.map { $0.deletingLastPathComponent() })
+        BrowserListingDidChange.post(folders: folders)
     }
 
     // MARK: - Trash
@@ -836,6 +869,9 @@ struct FileBrowserView: View {
             reload()
         }
         selection = []
+        BrowserListingDidChange.post(folders: result.trashed.map {
+            $0.from.deletingLastPathComponent()
+        })
     }
 
     // MARK: - Rename
@@ -882,11 +918,26 @@ struct FileBrowserView: View {
                 reload()
             }
             selection = [result.to]
+            BrowserListingDidChange.post(folders: [
+                result.from.deletingLastPathComponent(),
+                result.to.deletingLastPathComponent(),
+            ])
         } catch FileOperations.RenameError.unchanged {
             cancelRename()
         } catch {
             renameErrorMessage = error.localizedDescription
             // Stay in rename mode so the user can fix the name.
+        }
+    }
+
+    /// Other panes / tabs showing an affected folder should refresh without remounting.
+    private func handleRemoteListingChange(_ folders: [URL]) {
+        let affected = Set(folders.map(\.standardizedFileURL))
+        guard affected.contains(path.standardizedFileURL) else { return }
+        if isSearchActive {
+            scheduleSearch()
+        } else {
+            reload()
         }
     }
 }
@@ -896,15 +947,12 @@ private struct FileBrowserFocusedSceneModifier: ViewModifier {
     var displaySettings: BrowserDisplaySettings
     var folderURL: URL
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isActive {
-            content
-                .focusedSceneValue(\.browserDisplaySettings, displaySettings)
-                .focusedSceneValue(\.browserFolderURL, folderURL)
-        } else {
-            content
-        }
+        // Always apply the same modifier chain so activating a split pane does not
+        // remount the browser (which re-ran onAppear → reload and snapped scroll to top).
+        content
+            .focusedSceneValue(\.browserDisplaySettings, isActive ? displaySettings : nil)
+            .focusedSceneValue(\.browserFolderURL, isActive ? folderURL : nil)
     }
 }
 

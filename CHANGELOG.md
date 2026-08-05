@@ -11,6 +11,14 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-08-05
+
+### Fixed
+
+- Split view: drop files onto the other pane’s **current folder** (empty space / listing chrome), not only onto nested folder rows
+- After a cross-pane move/copy/trash/rename/undo, **every pane** showing an affected folder reloads so the source side does not stay stale
+- Focusing a split pane no longer remounts the browser (which re-ran `onAppear` and **reset scroll**)
+
 ## [1.3.0] — 2026-08-05
 
 Major windowing and workspace update: tabs, split view, session restore, embedded
@@ -68,7 +76,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.1
 [1.3.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.0
 [1.2.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.2.0
 [1.1.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.1.0

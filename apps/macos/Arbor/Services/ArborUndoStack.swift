@@ -50,6 +50,8 @@ struct ArborUndoApplyResult {
     var errorMessage: String?
     /// When redo/apply of `.trash` produces new trash URLs, the updated command to push undo.
     var rewrittenCommand: ArborUndoCommand?
+    /// Parent folders whose listings may be stale after this apply/invert.
+    var affectedFolders: [URL] = []
 }
 
 @Observable
@@ -147,7 +149,8 @@ final class ArborUndoStack {
             // After undo, items are back at `from`. Trash them again and remember new trash URLs.
             let result = FileOperations.trash(pairs.map(\.from))
             var applyResult = ArborUndoApplyResult(
-                restoredSelection: Set(result.trashed.map(\.from))
+                restoredSelection: Set(result.trashed.map(\.from)),
+                affectedFolders: pairs.map { $0.from.deletingLastPathComponent() }
             )
             if !result.failed.isEmpty {
                 let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
@@ -219,7 +222,10 @@ final class ArborUndoStack {
                 let ok = fm.createFile(atPath: target.path, contents: Data(), attributes: nil)
                 if !ok { throw CocoaError(.fileWriteUnknown) }
             }
-            return ArborUndoApplyResult(restoredSelection: [target])
+            return ArborUndoApplyResult(
+                restoredSelection: [target],
+                affectedFolders: [parent]
+            )
         } catch {
             return ArborUndoApplyResult(errorMessage: error.localizedDescription)
         }
@@ -231,12 +237,15 @@ final class ArborUndoStack {
     ) -> ArborUndoApplyResult {
         var restored: Set<URL> = []
         var failures: [String] = []
+        var affected: [URL] = []
         let fm = FileManager.default
 
         for pair in pairs {
             let source = pair.from.standardizedFileURL
             let destination = pair.to.standardizedFileURL
             let destinationParent = destination.deletingLastPathComponent()
+            affected.append(source.deletingLastPathComponent())
+            affected.append(destinationParent)
 
             do {
                 guard fm.fileExists(atPath: source.path) else {
@@ -274,7 +283,10 @@ final class ArborUndoStack {
             }
         }
 
-        var result = ArborUndoApplyResult(restoredSelection: restored)
+        var result = ArborUndoApplyResult(
+            restoredSelection: restored,
+            affectedFolders: affected
+        )
         if !failures.isEmpty {
             result.errorMessage = failures.joined(separator: "\n")
         }
@@ -283,9 +295,11 @@ final class ArborUndoStack {
 
     private func trashURLs(_ urls: [URL]) -> ArborUndoApplyResult {
         var failures: [String] = []
+        var affected: [URL] = []
         let fm = FileManager.default
 
         for url in urls {
+            affected.append(url.deletingLastPathComponent())
             do {
                 var resulting: NSURL?
                 try fm.trashItem(at: url, resultingItemURL: &resulting)
@@ -299,7 +313,7 @@ final class ArborUndoStack {
             }
         }
 
-        var result = ArborUndoApplyResult()
+        var result = ArborUndoApplyResult(affectedFolders: affected)
         if !failures.isEmpty {
             result.errorMessage = failures.joined(separator: "\n")
         }
