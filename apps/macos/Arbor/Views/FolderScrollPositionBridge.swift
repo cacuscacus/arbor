@@ -4,8 +4,9 @@ import SwiftUI
 /// Keeps a pane’s primary vertical `NSScrollView` offset in sync with `BrowserNavigation`
 /// so Back/Forward can restore Finder-like scroll positions (icon grid and list/table).
 ///
-/// Offsets are relative to the scroll view’s **natural top** (toolbar / contentInsets),
-/// never raw `bounds.origin.y = 0`, which would park icons under the titlebar glass.
+/// `.top` is a light one-shot reset (avoids landing mid-scroll after navigate). It does
+/// **not** apply toolbar contentInsets — fighting those either parked icons under the
+/// glass or opened a large empty band. Mid-folder restores use sticky offsets only.
 struct FolderScrollPositionBridge: NSViewRepresentable {
     @Binding var scrollY: CGFloat
     var restoreToken: UInt
@@ -40,8 +41,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
         private var liveObserver: NSObjectProtocol?
         private var lastRestoreToken: UInt = 0
         private var isApplyingRestore = false
-        /// Only sticky for mid-folder offsets while content height settles.
-        private var stickyRestoreOffset: CGFloat?
+        private var stickyRestoreY: CGFloat?
 
         func attach(near probe: NSView) {
             guard let found = Self.primaryVerticalScrollView(near: probe) else { return }
@@ -56,32 +56,29 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
             guard let parent else { return }
             if parent.restoreToken != lastRestoreToken {
                 lastRestoreToken = parent.restoreToken
-                stickyRestoreOffset = nil
+                stickyRestoreY = nil
                 guard let restore = parent.consumeRestore(), let scrollView else { return }
 
                 switch restore {
                 case .top:
-                    isApplyingRestore = true
-                    Self.scrollToNaturalTop(scrollView)
-                    parent.scrollY = 0
-                    isApplyingRestore = false
-                    // One follow-up after layout; do not stick to raw zero.
+                    // One-shot only — let Liquid Glass / safe-area layout own the resting top.
+                    jumpNearTop(scrollView)
                     DispatchQueue.main.async { [weak self] in
                         guard let self, let scrollView = self.scrollView else { return }
-                        self.isApplyingRestore = true
-                        Self.scrollToNaturalTop(scrollView)
-                        self.parent?.scrollY = 0
-                        self.isApplyingRestore = false
+                        // Only nudge again if we're still clearly mid-document from the previous folder.
+                        if Self.currentScrollY(scrollView) > 8 {
+                            self.jumpNearTop(scrollView)
+                        }
                     }
 
                 case .offset(let y):
-                    stickyRestoreOffset = max(0, y)
+                    stickyRestoreY = max(0, y)
                     applyStickyOffset()
                     DispatchQueue.main.async { [weak self] in
                         self?.applyStickyOffset()
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                        self?.stickyRestoreOffset = nil
+                        self?.stickyRestoreY = nil
                     }
                 }
                 return
@@ -90,10 +87,17 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
             applyStickyOffset()
         }
 
-        private func applyStickyOffset() {
-            guard let y = stickyRestoreOffset, let scrollView, let parent else { return }
+        private func jumpNearTop(_ scrollView: NSScrollView) {
             isApplyingRestore = true
-            Self.setScrollOffset(scrollView, y)
+            Self.setScrollY(scrollView, 0)
+            parent?.scrollY = 0
+            isApplyingRestore = false
+        }
+
+        private func applyStickyOffset() {
+            guard let y = stickyRestoreY, let scrollView, let parent else { return }
+            isApplyingRestore = true
+            Self.setScrollY(scrollView, y)
             parent.scrollY = y
             isApplyingRestore = false
         }
@@ -108,7 +112,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
             boundsObserver = nil
             liveObserver = nil
             scrollView = nil
-            stickyRestoreOffset = nil
+            stickyRestoreY = nil
         }
 
         private func startObserving(_ scroll: NSScrollView) {
@@ -121,7 +125,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 guard let self else { return }
-                if self.stickyRestoreOffset != nil {
+                if self.stickyRestoreY != nil {
                     self.applyStickyOffset()
                 }
                 self.publishScrollY()
@@ -138,40 +142,22 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
 
         private func publishScrollY() {
             guard !isApplyingRestore, let scrollView, let parent else { return }
-            let y = Self.currentScrollOffset(scrollView)
+            let y = Self.currentScrollY(scrollView)
             if abs(parent.scrollY - y) > 0.5 {
                 parent.scrollY = y
             }
         }
 
-        /// Distance past the natural top (toolbar insets accounted for).
-        private static func currentScrollOffset(_ scroll: NSScrollView) -> CGFloat {
-            max(0, scroll.contentView.bounds.origin.y - naturalTopY(scroll))
+        private static func currentScrollY(_ scroll: NSScrollView) -> CGFloat {
+            max(0, scroll.contentView.bounds.origin.y)
         }
 
-        private static func setScrollOffset(_ scroll: NSScrollView, _ offset: CGFloat) {
+        private static func setScrollY(_ scroll: NSScrollView, _ y: CGFloat) {
             let clip = scroll.contentView
             var origin = clip.bounds.origin
-            origin.y = naturalTopY(scroll) + max(0, offset)
+            origin.y = max(0, y)
             clip.scroll(to: origin)
             scroll.reflectScrolledClipView(clip)
-        }
-
-        private static func scrollToNaturalTop(_ scroll: NSScrollView) {
-            setScrollOffset(scroll, 0)
-        }
-
-        /// Resting top of the document under the toolbar / safe-area content insets.
-        private static func naturalTopY(_ scroll: NSScrollView) -> CGFloat {
-            let clip = scroll.contentView
-            // Titlebar / Liquid Glass underlap lands in contentInsets on the scroll view
-            // and sometimes also on the clip view.
-            let insetTop = scroll.contentInsets.top + clip.contentInsets.top
-            // Flipped clip views (SwiftUI / AppKit tables) use -inset as the top origin.
-            if clip.isFlipped {
-                return -insetTop
-            }
-            return insetTop
         }
 
         private static func primaryVerticalScrollView(near probe: NSView) -> NSScrollView? {

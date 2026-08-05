@@ -2,7 +2,6 @@ import Foundation
 import CoreGraphics
 
 /// One place in a pane’s Back/Forward history, including the scroll offset when we left it.
-/// `scrollY` is distance scrolled **past** the natural top resting position (toolbar insets preserved).
 struct FolderHistoryEntry: Equatable {
     var url: URL
     var scrollY: CGFloat
@@ -15,9 +14,9 @@ struct FolderHistoryEntry: Equatable {
 
 /// How to place the scroll view after a navigation change.
 enum FolderScrollRestore: Equatable {
-    /// Rest at the system “top” (respects toolbar / safe-area content insets).
+    /// Rest at the default top (do not fight toolbar insets / soft-edge layout).
     case top
-    /// Distance below that resting top.
+    /// Absolute vertical document offset to restore after content loads.
     case offset(CGFloat)
 }
 
@@ -28,7 +27,7 @@ final class BrowserNavigation {
     private var backStack: [FolderHistoryEntry] = []
     private var forwardStack: [FolderHistoryEntry] = []
 
-    /// Live distance past the natural top for the open folder.
+    /// Live vertical scroll for the open folder (kept current by the browser views).
     var scrollY: CGFloat = 0
 
     private(set) var pendingScrollRestore: FolderScrollRestore?
@@ -54,7 +53,6 @@ final class BrowserNavigation {
         forwardStack.removeAll()
         current = target
         scrollY = 0
-        // New folder → natural top (do **not** force raw y=0; that sits under the toolbar).
         requestScrollRestore(.top)
     }
 
