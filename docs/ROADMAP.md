@@ -4,6 +4,10 @@ Status legend: ⬚ planned · ◐ in progress · ✓ done
 
 Priorities may shift. **macOS remains the reference implementation**; other OS ports reuse `arbor-core` behind a native UI.
 
+**Shipped through [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1):** Finder-class browse (windows, tabs, split, session restore, DnD), embedded terminal with follow-cwd, Help → Release History / Check for Updates, Homebrew + GitHub Releases.
+
+**Recommended next milestone:** Phase **2b — AI coding tool / agent runners** (bring-your-own CLI agents in the current folder). Strong alternatives: Phase **4** quick diff / ambient Git, or a short **browser polish** slice (richer session fields, FS watchers, tab reorder).
+
 ---
 
 ## Phase 0 — Foundation
@@ -30,6 +34,7 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 - ◐ Filename search (`fd` / Spotlight / walk in the macOS app; not yet driven by `arbor-core`)
 - ⬚ Query language: `kind:`, `ext:`, `size>`, `modified:`
 - ⬚ Virtual scrolling for large directories
+- ⬚ Directory listing watchers (auto-refresh when the folder changes outside Arbor)
 
 ---
 
@@ -39,43 +44,81 @@ Goal: the folder you are looking at is also a place to **work** and to **delegat
 
 ### 2a — Embedded terminal (cwd = current folder)
 
-- ✓ Split / bottom / side terminal pane bound to the active directory
+Shipped core in [**v1.3.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0); depth still open:
+
+- ✓ Split / bottom terminal pane bound to the active directory
 - ✓ When the browser navigates, offer “follow cwd” vs “keep session cwd”
-- ◐ Shell profiles: system default (bash / zsh / fish / nushell via `$SHELL`) — Ghostty / extra profile picker still planned
+- ✓ Show/hide terminal + follow preference persistence (UserDefaults)
+- ◐ Shell profiles: system default via `$SHELL` today; Ghostty / explicit profile picker still planned
 - ◐ Restart shell in current cwd (copy/paste via SwiftTerm); tabs / multiple sessions per window still planned
-- ⬚ Session restoration after restart (scrollback policy TBD; at least cwd + profile)
+- ⬚ Session restoration after restart (scrollback policy TBD; at least cwd + profile + visible/hidden)
 
-### 2b — Configurable AI coding tool runners
+### 2b — Configurable AI coding tool runners ← **next recommended product slice**
 
-First-class launchers for CLI agents that operate **on the current folder (and selection)**, configured in Settings — not hard-coded to one vendor.
+First-class launchers for CLI agents that operate **on the current folder (and optional prompt / selection)**, configured in Settings — not hard-coded to one vendor. Arbor does **not** ship an embedded proprietary chat / agentic loop in this phase; that is Phase 5.
 
-**Built-in presets (detect PATH / custom binary path):**
+**Product intent (aligned):**
 
-| Preset | Example tools |
-|--------|----------------|
-| OpenCode | `opencode` |
-| Codex | `codex` |
-| Claude Code | `claude` |
-| Kimi Code | vendor CLI |
-| Qwen Coder | vendor CLI |
-| DeepSeek | vendor CLI |
-| Custom | any argv template |
+1. Right-click folder / empty space / selection → **Run Agent Here…**, or a global shortcut → small **prompt sheet** (“organize all the files into topics”).
+2. Settings → Tools defines each agent: display name, executable path (PATH detect + override), **argv template** with placeholders such as `{folder}`, `{prompt}`, `{selection}`, and host (`embedded terminal` default | `Ghostty` / `Terminal.app` / …).
+3. Arbor expands the template and runs the command in the focused pane’s cwd (or the clicked folder), so the agent TUI stays visible — no silent background jobs in v1.
 
-Each preset stores: display name, executable, argv template, env overrides, working-directory policy (`browser cwd` | `project root` | fixed path), and whether to open in the **embedded terminal** or an external terminal app (Ghostty / Terminal.app / etc.).
+**Initial presets to prove the path (user-testable locally):**
+
+| Preset | Notes |
+|--------|--------|
+| OpenCode | Detect `opencode` on PATH; argv template TBD per CLI docs |
+| Kimi Code | Detect vendor CLI on PATH; argv template TBD |
+| Cursor Agent | Detect Cursor CLI on PATH; argv template TBD (`folder` + `prompt` style) |
+| Custom | Any executable + freestyle argv template |
+
+Additional presets (Codex, Claude Code, Qwen, DeepSeek, …) are the same mechanism once templates are known.
+
+Each preset stores: display name, executable, argv template, env overrides, working-directory policy (`browser cwd` | `clicked folder` | `project root` | fixed path), and launch host (embedded vs external terminal app).
 
 **User flows:**
 
-1. **Agent prompt** — e.g. “review everything in this folder and organize it” → Arbor opens the chosen agent in the folder cwd with the prompt (and optional selection paths) injected.
-2. **Quick run** — start agent REPL / TUI in cwd with no prompt.
-3. **Plain terminal** — open a normal shell in cwd for manual work.
+1. **Agent prompt** — shortcut / context menu → prompt sheet → run configured CLI with `{folder}` + `{prompt}` (+ optional `{selection}`).
+2. **Quick run** — start agent REPL / TUI in cwd with no prompt (empty `{prompt}` / alternate template).
+3. **Plain terminal** — normal shell in cwd (Phase 2a).
 
-**Guardrails (product rules):**
+**Guardrails:**
 
-- Destructive agent actions stay visible in the terminal (Arbor does not silently run shell behind the user’s back in v1 of this feature).
-- Settings → Tools: enable/disable presets, set paths, defaults, keyboard shortcuts.
+- Agent I/O stays in a terminal the user can see.
+- Settings → Tools: enable/disable presets, paths, templates, default agent, shortcuts, launch host.
 - Never ship API keys in-repo; agents use the user’s own CLIs / auth.
 
-Related later work in Phase 5 (NL → Arbor-native actions) complements this; Phase 2 is **bring-your-own agent CLI inside Arbor’s folder context**.
+**Suggested v1.4.0 cut (draft):**
+
+1. Settings window → **Tools** pane (persist presets to Application Support / UserDefaults)
+2. Built-in templates for **OpenCode**, **Kimi**, **Cursor Agent** + Custom (templates verified against installed CLIs — see research note below)
+3. Context menu **Run Agent Here…** + menu/shortcut → prompt sheet
+4. Default launch into **embedded terminal**; per-preset override to Ghostty / Terminal.app
+5. PATH detection with manual path override when missing
+
+Out of scope for first cut: Arbor-native agentic loop, API-provider chat UI, silent background agents, key vaults.
+
+**CLI research (this machine, 2026-08-05):**
+
+| Tool | Binary found | Interactive (TUI) with prompt | Notes |
+|------|--------------|-------------------------------|--------|
+| OpenCode | `/opt/homebrew/bin/opencode` (1.18.9) | `opencode --prompt "{prompt}" "{folder}"` | Also `opencode run "{prompt}" --dir "{folder}"` = non-interactive. Prefer TUI + `--prompt` for Arbor. |
+| Kimi Code | `~/.kimi-code/bin/kimi` (0.31.1) | `kimi` in cwd opens TUI; **`-p/--prompt` is print-only (no TUI)** | **Decision:** prompt sheet → `kimi -p "{prompt}"` with cwd=`{folder}`. Quick Run → `kimi` TUI. |
+| Cursor IDE | `/opt/homebrew/bin/cursor` | N/A (opens editor) | **Decision:** separate non-agent action **Open in Cursor** → `cursor "{folder}"`. |
+| Cursor Agent | not on PATH (`agent` / `cursor-agent`) | Install separately; then `agent "{prompt}"` in cwd | Optional preset once installed. Not the same binary as `cursor`. |
+
+Draft default argv templates (shell-quoted expansion later):
+
+```text
+OpenCode:           opencode --prompt "{prompt}" "{folder}"
+Kimi (prompt):      kimi -p "{prompt}"          # cwd={folder}; print/auto mode
+Kimi (quick):       kimi                        # cwd={folder}; TUI
+Cursor Agent:       agent "{prompt}"            # cwd={folder}; requires Agent CLI
+Open in Cursor IDE: cursor "{folder}"           # separate action, not an agent runner
+Custom:             {executable} …user template…
+```
+
+Quick Run (no prompt): OpenCode `opencode "{folder}"`, Kimi `kimi`, Cursor Agent `agent`.
 
 ---
 
@@ -83,36 +126,33 @@ Related later work in Phase 5 (NL → Arbor-native actions) complements this; Ph
 
 Goal: Arbor feels like a real desktop app across restarts and crashes — Finder-class windowing.
 
-### Windows
+Largely shipped across [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0)–[v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1).
 
-Shipped in [**v1.1.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0):
+### Windows
 
 - ✓ **New Window** from File menu (⌘N) and Dock right-click menu; clones the frontmost / last-focused folder
 - ✓ Independent windows (separate navigation / selection / view state; shared favorites)
 - ✓ Dock click with no open windows restores a **single** window (reopen vs SwiftUI default de-duplicated)
 - ✓ Open window from a selected folder (“Open in New Window”)
-- ◐ Persist per-window: frame (position/size), tab pane cwds, focused pane, selected tab (not yet: sidebar width, view mode, sort, richer terminal session fields)
-- ⬚ Persist global: favorites, tool presets, default agent, appearance
+- ◐ Persist per-window: frame, tabs, pane cwds, focused pane, selected tab (not yet: sidebar width, per-pane view mode/sort if they diverge from app defaults, richer terminal session fields)
+- ⬚ Persist global: tool presets, default agent, appearance preferences schema (favorites already persist)
 - ✓ Restore session on launch (“Reopen windows”); safe degrade if a path vanished
 - ✓ Crash / forced-quit: write state atomically so a restart restores the last good snapshot
 
 ### Tabs
 
-Finder-style tabs inside a window so one frame can host multiple folders:
-
-- ✓ Tab bar with open / close; ⌘T new tab, ⌘W close tab (window when last tab); Finder-style floating pill island — reorder still planned
+- ✓ Tab bar with open / close; ⌘T new tab, ⌘W close tab (window when last tab); Finder-style floating pill island
 - ✓ Each tab owns its own navigation stack; selection and view mode preserved while switching (inactive browsers stay mounted)
+- ⬚ Drag-reorder tabs
 - ⬚ Drag folder onto tab bar / “Open in New Tab”
 - ⬚ Optional: merge all windows into tabs / move tab to new window
 
 ### Split view
 
-Two (later more) folder panes in one window for side-by-side browsing:
-
 - ✓ Horizontal split (primary)
 - ⬚ Vertical split as follow-up
 - ✓ Each pane has its own cwd, selection, and history
-- ✓ Drag-and-drop between panes (copy/move with same semantics as between windows)
+- ✓ Drag-and-drop between panes (copy/move; pane-root drop + cross-pane listing refresh in [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1))
 - ✓ “Open in Split” from selection (browser / Favorites); View → Toggle Split View (⌘\) / Close Split View
 
 Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
@@ -121,7 +161,9 @@ Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers +
 
 ## Phase 4 — Developer mode & quick file diff
 
-- ⬚ Git status in list / sidebar; detect repos for a sidebar section
+Ambient Git + a fast two-file compare — the “I’m in a repo” feeling without becoming a full IDE.
+
+- ⬚ Git status badges in the list / sidebar; detect repos for a sidebar section
 - ⬚ Open in Cursor / VS Code / Zed / Xcode / IntelliJ / …
 - ⬚ Blame / file history (deeper Git)
 
@@ -142,7 +184,7 @@ Out of scope for the first cut: three-way merge, editing inside the diff, direct
 
 Builds on Phase 2b; Arbor-native intelligence rather than only spawning external TUIs.
 
-- ⬚ NL → Arbor actions / shell with confirmation
+- ⬚ Arbor-native agentic loop / NL → Arbor actions with confirmation
 - ⬚ Provider adapters (CLI tools + API providers)
 - ⬚ Folder / file rules, triggers, workflows
 - ⬚ Batch rename / move / convert / compress / dedupe
@@ -193,6 +235,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ GitHub Releases with packaged ZIP assets (`gh release create`)
 - ✓ [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) — initial Homebrew / browser MVP
 - ✓ [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) — multi-window (File + Dock New Window)
+- ✓ [v1.2.0](https://github.com/cacuscacus/arbor/releases/tag/v1.2.0) — Help → Release History
 - ✓ [v1.3.0](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0) — tabs, split view, session restore, embedded terminal, Check for Updates, Open in New Window
 - ✓ [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1) — split DnD onto pane root + cross-pane listing refresh without scroll reset
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
@@ -211,7 +254,13 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.3.0 tabs, split view, session restore, embedded terminal,
   Check for Updates, Open in New Window
 ✓ v1.3.1 split DnD / listing refresh fixes
-  → agent runners → Quick diff / Git → remotes → Linux / Windows
+→ next: v1.4.0 agent runners (Phase 2b)   ← recommended
+     Settings → Tools + Run Agent Here… + prompt sheet
+     presets: OpenCode, Kimi, Cursor (+ Custom)
+     host: embedded terminal default, external configurable
+  alternatives / polish: quick diff / Git, session fields, tab reorder,
+     FS watchers, vertical split
+  then: richer terminal sessions → remotes / preview → Linux / Windows
 ```
 
-Remaining polish: richer session fields (view mode / sort / sidebar / terminal visibility), agent runners.
+Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers, vertical split, shell profile picker.
