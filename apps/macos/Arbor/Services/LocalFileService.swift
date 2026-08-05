@@ -240,6 +240,64 @@ enum WorkspaceActions {
         try? process.run()
     }
 
+    /// Opens Cursor IDE on a folder (IDE launcher — not Cursor Agent CLI).
+    static func openInCursor(at directory: URL) {
+        openInApplication(named: "Cursor", path: directory)
+    }
+
+    static func openInApplication(named appName: String, path: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", appName, path.standardizedFileURL.path]
+        try? process.run()
+    }
+
+    /// Runs `command` in Terminal.app after `cd` into `directory`, then leaves an interactive shell.
+    static func runInTerminalApp(command: String, directory: URL) {
+        let dir = AgentCommandExpander.shellEscape(directory.standardizedFileURL.path)
+        let script = "cd \(dir) && \(command)"
+        let source = """
+        tell application "Terminal"
+          activate
+          do script \(applescriptString(script))
+        end tell
+        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        try? process.run()
+    }
+
+    private static func applescriptString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    /// Runs `command` in Ghostty when installed; falls back to Terminal.app.
+    static func runInGhostty(command: String, directory: URL) {
+        let ghostty = URL(fileURLWithPath: "/Applications/Ghostty.app")
+        guard FileManager.default.fileExists(atPath: ghostty.path) else {
+            runInTerminalApp(command: command, directory: directory)
+            return
+        }
+        let dir = directory.standardizedFileURL.path
+        let wrapped = "cd \(AgentCommandExpander.shellEscape(dir)) && \(command); exec \"$SHELL\" -i"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [
+            "-na", "Ghostty",
+            "--args",
+            "-e", "/bin/zsh", "-lc", wrapped,
+        ]
+        do {
+            try process.run()
+        } catch {
+            runInTerminalApp(command: command, directory: directory)
+        }
+    }
+
     static func terminalDirectory(for entry: FileEntry) -> URL {
         if entry.isBrowsable {
             return entry.id

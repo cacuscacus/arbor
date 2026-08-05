@@ -85,6 +85,13 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - **Session restore**: quit/relaunch restores frames, tabs, and split pane folders (`~/Library/Application Support/Arbor/session.json`)
 - **Embedded terminal** (⌘J / ⌃\`): SwiftTerm PTY with Follow Folder + Restart; canvas insets text from the edges
 
+### Agents / Settings
+
+- **Arbor → Settings…** (⌘,) → **Tools**: enable presets, edit argv templates (`{folder}` `{prompt}` `{selection}`), choose Embedded / Terminal.app / Ghostty
+- **Agent → Run Agent Here…** (⇧⌘R) or folder context menu → prompt sheet → runs in the configured host
+- **Agent → Quick Run Agent** (⌥⌘R) uses the default tool with its quick-run template
+- **Open in Cursor** opens the folder in Cursor IDE (not the Cursor Agent CLI)
+
 ### Help
 
 - **Help → Check for Updates…** — compares `CFBundleShortVersionString` to the latest GitHub Release; opens the release page or copies `brew upgrade --cask arbor` (does not auto-install)

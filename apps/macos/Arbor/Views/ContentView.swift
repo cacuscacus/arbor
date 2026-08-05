@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage(TerminalPreferences.isVisibleKey) private var isTerminalVisible = false
     @AppStorage(TerminalPreferences.followCwdKey) private var followCwd = true
     @State private var terminalRestartToken = UUID()
+    @Bindable private var agentRun = AgentRunCoordinator.shared
 
     init(rootDirectory: URL? = nil) {
         if rootDirectory == nil, let snapshot = BrowserSessionStore.shared.dequeuePendingWindow() {
@@ -85,6 +86,23 @@ struct ContentView: View {
         .focusedSceneValue(\.activeBrowserTab, selectedTab)
         .background {
             tabShortcuts
+        }
+        .sheet(item: $agentRun.request) { request in
+            RunAgentSheet(
+                folder: request.folder,
+                selection: request.selection
+            )
+        }
+        .alert(
+            "Could not run agent",
+            isPresented: Binding(
+                get: { agentRun.launchError != nil },
+                set: { if !$0 { agentRun.launchError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { agentRun.launchError = nil }
+        } message: {
+            Text(agentRun.launchError ?? "")
         }
         .onChange(of: sessionFingerprint, initial: true) { _, _ in
             publishSession()

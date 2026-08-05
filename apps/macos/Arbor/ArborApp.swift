@@ -20,6 +20,12 @@ struct ArborApp: App {
                     AboutWindowController.shared.show()
                 }
             }
+            CommandGroup(after: .appInfo) {
+                Button("Settings…") {
+                    SettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(replacing: .help) {
                 Button("Check for Updates…") {
                     UpdateCheckService.checkForUpdates()
@@ -32,6 +38,9 @@ struct ArborApp: App {
                         NSWorkspace.shared.open(url)
                     }
                 }
+            }
+            CommandMenu("Agent") {
+                AgentCommands()
             }
             CommandMenu("View") {
                 SplitViewCommands()
@@ -69,6 +78,37 @@ private struct NewWindowCommands: Commands {
                 WindowLaunchCoordinator.openNewWindow(cloning: browserFolderURL)
             }
             .keyboardShortcut("n", modifiers: .command)
+        }
+    }
+}
+
+private struct AgentCommands: View {
+    @FocusedValue(\.browserFolderURL) private var browserFolderURL
+
+    var body: some View {
+        Button("Run Agent Here…") {
+            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
+            AgentRunCoordinator.shared.presentRunAgent(folder: folder)
+        }
+        .keyboardShortcut("r", modifiers: [.command, .shift])
+
+        Button("Quick Run Agent") {
+            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
+            AgentRunCoordinator.shared.presentRunAgent(folder: folder, quickRun: true)
+        }
+        .keyboardShortcut("r", modifiers: [.command, .option])
+
+        Divider()
+
+        Button("Open Folder in Cursor") {
+            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
+            WorkspaceActions.openInCursor(at: folder)
+        }
+
+        Divider()
+
+        Button("Agent Settings…") {
+            SettingsWindowController.shared.show()
         }
     }
 }

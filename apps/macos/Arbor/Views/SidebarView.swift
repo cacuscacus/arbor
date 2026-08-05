@@ -229,6 +229,12 @@ struct SidebarView: View {
                     onOpenInSplit(item.url)
                 }
             }
+            Button("Run Agent Here…") {
+                AgentRunCoordinator.shared.presentRunAgent(folder: item.url)
+            }
+            Button("Open in Cursor") {
+                WorkspaceActions.openInCursor(at: item.url)
+            }
             Button("Remove from Favorites", role: .destructive) {
                 withAnimation(listSpring) {
                     favorites.remove(id: item.id)

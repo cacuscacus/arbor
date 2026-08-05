@@ -440,6 +440,13 @@ struct FileBrowserView: View {
             Button("New Empty File…") {
                 beginCreateItem(.file)
             }
+            Divider()
+            Button("Run Agent Here…") {
+                AgentRunCoordinator.shared.presentRunAgent(folder: path)
+            }
+            Button("Open in Cursor") {
+                WorkspaceActions.openInCursor(at: path)
+            }
         }
     }
 
@@ -526,6 +533,21 @@ struct FileBrowserView: View {
             WorkspaceActions.openTerminal(at: WorkspaceActions.terminalDirectory(for: resolved))
         }
         .help(targets.count > 1 ? "Opens at the shared folder for this selection" : "")
+
+        Button("Run Agent Here…") {
+            commitContextSelection(anchor: anchor)
+            let resolved = previewTargets(for: anchor)
+            AgentRunCoordinator.shared.presentRunAgent(
+                folder: WorkspaceActions.terminalDirectory(for: resolved),
+                selection: resolved.map(\.id)
+            )
+        }
+
+        Button("Open in Cursor") {
+            commitContextSelection(anchor: anchor)
+            let resolved = previewTargets(for: anchor)
+            WorkspaceActions.openInCursor(at: WorkspaceActions.terminalDirectory(for: resolved))
+        }
 
         Divider()
 

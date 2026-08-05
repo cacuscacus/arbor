@@ -11,6 +11,23 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-08-05
+
+Bring-your-own AI coding CLIs into the folder you’re browsing — Settings-configured runners, prompt sheet, and embedded/external terminal hosts.
+
+### Added
+
+- **Settings → Tools** (⌘,): OpenCode, Kimi Code, Cursor Agent, and Custom presets with PATH detection, path override, argv templates (`{folder}`, `{prompt}`, `{selection}`), and launch host (Embedded Terminal / Terminal.app / Ghostty)
+- **Run Agent Here…** from folder context menus (browser, empty space, Favorites) and the **Agent** menu (⇧⌘R); prompt sheet with command preview; empty prompt = Quick Run
+- **Quick Run Agent** (⌥⌘R) launches the default tool’s quick-run template
+- **Open in Cursor** opens the target folder in Cursor IDE (separate from Cursor Agent CLI)
+- Embedded terminal **Close** and **Copy Output** header actions (alongside Restart / Follow Folder)
+
+### Fixed
+
+- Embedded shells start as login+interactive (`zsh -il`) with Homebrew on PATH; agent launches rewrite bare binaries to absolute paths when detected
+- Kimi templates `cd` into `{folder}` first (Kimi uses process cwd; OpenCode already took the folder as an arg)
+
 ## [1.3.1] — 2026-08-05
 
 ### Fixed
@@ -76,7 +93,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.0
 [1.3.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.1
 [1.3.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.0
 [1.2.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.2.0

@@ -4,9 +4,9 @@ Status legend: ⬚ planned · ◐ in progress · ✓ done
 
 Priorities may shift. **macOS remains the reference implementation**; other OS ports reuse `arbor-core` behind a native UI.
 
-**Shipped through [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1):** Finder-class browse (windows, tabs, split, session restore, DnD), embedded terminal with follow-cwd, Help → Release History / Check for Updates, Homebrew + GitHub Releases.
+**Shipped through [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0):** Finder-class browse (windows, tabs, split, session restore, DnD), embedded terminal, **agent runners** (Settings → Tools + Run Agent Here…), Help → Release History / Check for Updates, Homebrew + GitHub Releases.
 
-**Recommended next milestone:** Phase **2b — AI coding tool / agent runners** (bring-your-own CLI agents in the current folder). Strong alternatives: Phase **4** quick diff / ambient Git, or a short **browser polish** slice (richer session fields, FS watchers, tab reorder).
+**Recommended next milestone:** Phase **4** quick diff / ambient Git, or browser polish (richer session fields, FS watchers, tab reorder), or deeper Phase **2a** terminal sessions.
 
 ---
 
@@ -53,9 +53,20 @@ Shipped core in [**v1.3.0**](https://github.com/cacuscacus/arbor/releases/tag/v1
 - ◐ Restart shell in current cwd (copy/paste via SwiftTerm); tabs / multiple sessions per window still planned
 - ⬚ Session restoration after restart (scrollback policy TBD; at least cwd + profile + visible/hidden)
 
-### 2b — Configurable AI coding tool runners ← **next recommended product slice**
+### 2b — Configurable AI coding tool runners
 
-First-class launchers for CLI agents that operate **on the current folder (and optional prompt / selection)**, configured in Settings — not hard-coded to one vendor. Arbor does **not** ship an embedded proprietary chat / agentic loop in this phase; that is Phase 5.
+Shipped in [**v1.4.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0):
+
+- ✓ Settings → Tools (⌘,) — presets, PATH detect, templates, launch host
+- ✓ **Run Agent Here…** prompt sheet (context menus, Agent menu, ⇧⌘R)
+- ✓ Quick Run (⌥⌘R) + embedded terminal command injection
+- ✓ External host: Terminal.app / Ghostty
+- ✓ **Open in Cursor** (IDE folder open; separate from Cursor Agent CLI)
+- ✓ Built-in presets: OpenCode, Kimi Code, Cursor Agent (+ Custom)
+- ✓ Login-shell PATH + absolute binary rewrite; Kimi `cd {folder}` templates
+- ✓ Embedded terminal Close + Copy Output
+
+Optional later: missing-binary install hints, richer Settings polish, more vendor presets.
 
 **Product intent (aligned):**
 
@@ -111,8 +122,8 @@ Draft default argv templates (shell-quoted expansion later):
 
 ```text
 OpenCode:           opencode --prompt "{prompt}" "{folder}"
-Kimi (prompt):      kimi -p "{prompt}"          # cwd={folder}; print/auto mode
-Kimi (quick):       kimi                        # cwd={folder}; TUI
+Kimi (prompt):      cd {folder} && kimi -p "{prompt}"   # print/auto mode (cwd via cd)
+Kimi (quick):       cd {folder} && kimi              # TUI
 Cursor Agent:       agent "{prompt}"            # cwd={folder}; requires Agent CLI
 Open in Cursor IDE: cursor "{folder}"           # separate action, not an agent runner
 Custom:             {executable} …user template…
@@ -238,6 +249,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.2.0](https://github.com/cacuscacus/arbor/releases/tag/v1.2.0) — Help → Release History
 - ✓ [v1.3.0](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0) — tabs, split view, session restore, embedded terminal, Check for Updates, Open in New Window
 - ✓ [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1) — split DnD onto pane root + cross-pane listing refresh without scroll reset
+- ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -254,13 +266,9 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.3.0 tabs, split view, session restore, embedded terminal,
   Check for Updates, Open in New Window
 ✓ v1.3.1 split DnD / listing refresh fixes
-→ next: v1.4.0 agent runners (Phase 2b)   ← recommended
-     Settings → Tools + Run Agent Here… + prompt sheet
-     presets: OpenCode, Kimi, Cursor (+ Custom)
-     host: embedded terminal default, external configurable
-  alternatives / polish: quick diff / Git, session fields, tab reorder,
-     FS watchers, vertical split
-  then: richer terminal sessions → remotes / preview → Linux / Windows
+✓ v1.4.0 agent runners (Phase 2b)
+  → next: quick diff / Git (Phase 4), browser polish,
+     richer terminal sessions → remotes / preview → Linux / Windows
 ```
 
-Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers, vertical split, shell profile picker.
+Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers, vertical split, shell profile picker, more agent presets.
