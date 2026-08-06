@@ -365,7 +365,8 @@ private struct TabDetailView: View {
                             pane: pane,
                             favorites: favorites,
                             dragState: dragState,
-                            isActive: isActive && tab.focusedPaneID == pane.id
+                            isActive: isActive && tab.focusedPaneID == pane.id,
+                            isVisible: isActive
                         )
                     }
                 }
@@ -375,7 +376,8 @@ private struct TabDetailView: View {
                     pane: pane,
                     favorites: favorites,
                     dragState: dragState,
-                    isActive: isActive
+                    isActive: isActive,
+                    isVisible: isActive
                 )
             }
         }
@@ -389,6 +391,8 @@ private struct PaneBrowserHost: View {
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
     var isActive: Bool
+    /// Selected tab (true for both split panes when the tab is showing).
+    var isVisible: Bool
 
     var body: some View {
         FileBrowserView(
@@ -396,6 +400,7 @@ private struct PaneBrowserHost: View {
             favorites: favorites,
             dragState: dragState,
             isActive: isActive,
+            isVisible: isVisible,
             onOpenInSplit: { url in
                 tab.openInSplit(folder: url)
             }

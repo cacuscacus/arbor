@@ -4,7 +4,7 @@ Status legend: ⬚ planned · ◐ in progress · ✓ done
 
 Priorities may shift. **macOS remains the reference implementation**; other OS ports reuse `arbor-core` behind a native UI.
 
-**Shipped through [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0):** Finder-class browse (windows, tabs, split, session restore, DnD), embedded terminal, **agent runners** (Settings → Tools + Run Agent Here…), Help → Release History / Check for Updates, Homebrew + GitHub Releases.
+**Shipped through [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1):** Finder-class browse (windows, tabs, split, session restore, DnD, live folder refresh), embedded terminal, **agent runners** (Settings → Tools + Run Agent Here…), Help → Release History / Check for Updates, Homebrew + GitHub Releases.
 
 **Recommended next milestone:** Phase **4** quick diff / ambient Git, or browser polish (richer session fields, FS watchers, tab reorder), or deeper Phase **2a** terminal sessions.
 
@@ -34,7 +34,7 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 - ◐ Filename search (`fd` / Spotlight / walk in the macOS app; not yet driven by `arbor-core`)
 - ⬚ Query language: `kind:`, `ext:`, `size>`, `modified:`
 - ⬚ Virtual scrolling for large directories
-- ⬚ Directory listing watchers (auto-refresh when the folder changes outside Arbor)
+- ✓ Directory listing watchers (auto-refresh when the folder changes outside Arbor) — visible tab panes only, debounced
 
 ---
 
@@ -250,6 +250,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.3.0](https://github.com/cacuscacus/arbor/releases/tag/v1.3.0) — tabs, split view, session restore, embedded terminal, Check for Updates, Open in New Window
 - ✓ [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1) — split DnD onto pane root + cross-pane listing refresh without scroll reset
 - ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
+- ✓ [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1) — live folder listing refresh for visible panes
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -267,8 +268,9 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
   Check for Updates, Open in New Window
 ✓ v1.3.1 split DnD / listing refresh fixes
 ✓ v1.4.0 agent runners (Phase 2b)
+✓ v1.4.1 live folder listing refresh
   → next: quick diff / Git (Phase 4), browser polish,
      richer terminal sessions → remotes / preview → Linux / Windows
 ```
 
-Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers, vertical split, shell profile picker, more agent presets.
+Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers depth/polish, vertical split, shell profile picker, more agent presets, manual Refresh (⌘R).

@@ -11,6 +11,12 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-08-06
+
+### Fixed
+
+- Folder listings **auto-refresh** when files change outside Arbor (visible tab panes only, debounced), plus a reload when the app becomes active again
+
 ## [1.4.0] — 2026-08-05
 
 Bring-your-own AI coding CLIs into the folder you’re browsing — Settings-configured runners, prompt sheet, and embedded/external terminal hosts.
@@ -93,7 +99,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.1
 [1.4.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.0
 [1.3.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.1
 [1.3.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.0

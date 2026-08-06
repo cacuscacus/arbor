@@ -7,6 +7,8 @@ struct FileBrowserView: View {
     var dragState: FileDragState
     /// When multiple tab / split browsers stay mounted, only the focused pane publishes scene focus values.
     var isActive: Bool = true
+    /// Tab is selected (both split panes can be visible). Drives live directory watching.
+    var isVisible: Bool = true
     /// Opens a folder in the other split pane (creates a split if needed).
     var onOpenInSplit: ((URL) -> Void)? = nil
 
@@ -163,6 +165,18 @@ struct FileBrowserView: View {
             if isActive, !isSearchPresented {
                 listFocused = true
             }
+        }
+        .background {
+            FolderListingWatchActivator(
+                path: (isVisible && !isSearchActive) ? path : nil
+            ) {
+                reload()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Cheap catch-up if a DispatchSource event was missed while unfocused.
+            guard isVisible, !isSearchActive else { return }
+            reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: BrowserListingDidChange.name)) { note in
             handleRemoteListingChange(BrowserListingDidChange.folders(from: note))
