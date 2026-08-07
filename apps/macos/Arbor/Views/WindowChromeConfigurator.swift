@@ -20,6 +20,7 @@ struct WindowChromeConfigurator: NSViewRepresentable {
 
     private static func apply(to window: NSWindow?) {
         guard let window else { return }
+        ArborBrowserWindow.prepare(window)
         // Leave titlebar / glass / backgrounds to the system.
         if let split = firstSplitView(in: window.contentView) {
             split.dividerStyle = .thin

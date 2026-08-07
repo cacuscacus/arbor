@@ -321,6 +321,7 @@ private struct SessionWindowFrameTracker: NSViewRepresentable {
                 observers.forEach { center.removeObserver($0) }
                 observers.removeAll()
                 observedWindow = window
+                ArborBrowserWindow.prepare(window)
 
                 for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
                     let token = center.addObserver(forName: name, object: window, queue: .main) {

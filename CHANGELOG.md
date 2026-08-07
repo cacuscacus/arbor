@@ -11,6 +11,12 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-08-07
+
+### Fixed
+
+- Dock **New Window** (and Dock reopen with no windows) opens on the **current virtual desktop**, even when another Arbor window lives on a different Space
+
 ## [1.4.1] — 2026-08-06
 
 ### Fixed
@@ -99,7 +105,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.2
 [1.4.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.1
 [1.4.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.0
 [1.3.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.3.1

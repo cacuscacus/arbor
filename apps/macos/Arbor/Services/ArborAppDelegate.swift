@@ -18,7 +18,7 @@ final class ArborAppDelegate: NSObject, NSApplicationDelegate {
             // SwiftUI's WindowGroup create another → duplicate windows.
             // Do not re-run launch session restore here.
             Task { @MainActor in
-                WindowLaunchCoordinator.openNewWindow()
+                WindowLaunchCoordinator.openNewWindow(onActiveSpace: true)
             }
             return false
         }
@@ -52,7 +52,9 @@ final class ArborAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newWindowFromDock(_ sender: Any?) {
         Task { @MainActor in
-            WindowLaunchCoordinator.openNewWindow()
+            // Prefer the desktop the user is standing on, not the Space that
+            // already hosts another Arbor window.
+            WindowLaunchCoordinator.openNewWindow(onActiveSpace: true)
         }
     }
 }
