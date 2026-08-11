@@ -21,6 +21,7 @@ final class BrowserSessionStore {
     private init() {
         #if DEBUG
         BrowserSessionSnapshot.runSelfCheck()
+        BrowserSort.runSelfCheck()
         #endif
     }
 

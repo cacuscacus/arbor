@@ -6,6 +6,7 @@ struct FileEntry: Identifiable, Hashable {
     let name: String
     let isDirectory: Bool
     let isPackage: Bool
+    let isHidden: Bool
     let size: UInt64
     let kind: String
     let modified: Date?
@@ -28,6 +29,9 @@ struct FileEntry: Identifiable, Hashable {
     var modifiedForSort: Date { modified ?? .distantPast }
     var createdForSort: Date { created ?? .distantPast }
     var sizeForSort: UInt64 { (isDirectory && !isPackage) ? 0 : size }
+
+    /// Finder dims hidden items when “Show Hidden Files” is on (~50% opacity).
+    var listingOpacity: Double { isHidden ? 0.5 : 1 }
 
     var symbolName: String {
         if isPackage { return "app.fill" }
@@ -123,7 +127,7 @@ enum LocalFileService {
             if lhs.isBrowsable != rhs.isBrowsable {
                 return lhs.isBrowsable && !rhs.isBrowsable
             }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
 
         return entries
@@ -186,6 +190,7 @@ enum LocalFileService {
             name: values?.name ?? url.lastPathComponent,
             isDirectory: isDir,
             isPackage: isPackage,
+            isHidden: (values?.isHidden == true) || url.lastPathComponent.hasPrefix("."),
             size: size,
             kind: kind,
             modified: values?.contentModificationDate,

@@ -48,6 +48,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                             .allowsHitTesting(false)
                     }
                 }
+                .opacity(entry.listingOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .dropFolderTarget(entry: entry, dragState: dragState, onTransfer: onTransfer)
@@ -59,6 +60,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                     Text(entry.kind)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 80, ideal: 120)
             }
@@ -69,6 +71,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 70, ideal: 90)
             }
@@ -78,6 +81,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                     Text(entry.formatted(entry.modified))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 120, ideal: 160)
             }
@@ -87,6 +91,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                     Text(entry.formatted(entry.created))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 120, ideal: 160)
             }
@@ -98,6 +103,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(entry.relativePath(to: relativeRoot))
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 140, ideal: 220)
             }
@@ -109,6 +115,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(entry.fullPath)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 180, ideal: 280)
             }
@@ -120,6 +127,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(entry.id.deletingLastPathComponent().path)
+                        .opacity(entry.listingOpacity)
                 }
                 .width(min: 120, ideal: 200)
             }
@@ -499,6 +507,7 @@ private struct IconCell<MenuContent: View>: View {
         }
         .padding(.top, 6)
         .padding(.horizontal, 4)
+        .opacity(entry.listingOpacity)
         .background {
             RoundedRectangle(cornerRadius: 6)
                 .fill(isDropTarget ? Color.accentColor.opacity(0.14) : Color.clear)

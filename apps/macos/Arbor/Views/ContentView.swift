@@ -16,6 +16,7 @@ struct ContentView: View {
     @AppStorage(TerminalPreferences.followCwdKey) private var followCwd = true
     @State private var terminalRestartToken = UUID()
     @Bindable private var agentRun = AgentRunCoordinator.shared
+    @State private var windowSort = WindowBrowserSortStore()
 
     init(rootDirectory: URL? = nil) {
         if rootDirectory == nil, let snapshot = BrowserSessionStore.shared.dequeuePendingWindow() {
@@ -83,7 +84,9 @@ struct ContentView: View {
             )
         )
         .focusEffectDisabled()
+        .environment(windowSort)
         .focusedSceneValue(\.activeBrowserTab, selectedTab)
+        .focusedSceneValue(\.windowBrowserSort, windowSort)
         .background {
             tabShortcuts
         }
@@ -418,6 +421,7 @@ private struct PaneBrowserHost: View {
 private struct FocusedPaneWindowChromeModifier: ViewModifier {
     var isEnabled: Bool
     @Bindable var tab: BrowserTab
+    @Environment(WindowBrowserSortStore.self) private var windowSort
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -501,6 +505,13 @@ private struct FocusedPaneWindowChromeModifier: ViewModifier {
                     .pickerStyle(.segmented)
                     .frame(width: 72)
                     .help("List or icon view")
+
+                    Menu {
+                        BrowserSortMenuContent(store: windowSort)
+                    } label: {
+                        Label("Sort By", systemImage: "arrow.up.arrow.down")
+                    }
+                    .help("Sort By")
 
                     Button {
                         pane.sendChrome(.toggleSearch)

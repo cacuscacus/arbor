@@ -18,9 +18,6 @@ struct FileBrowserView: View {
 
     @State private var entries: [FileEntry] = []
     @State private var selection = Set<URL>()
-    @State private var sortOrder: [KeyPathComparator<FileEntry>] = [
-        .init(\.name, comparator: .localizedStandard),
-    ]
     @State private var errorMessage: String?
     @State private var details: FileDetails?
     @State private var multiInfo: MultiSelectionInfo?
@@ -46,6 +43,7 @@ struct FileBrowserView: View {
     @FocusState private var listFocused: Bool
     @FocusState private var searchFocused: Bool
     @AppStorage(HiddenFilesPreference.key) private var showHiddenFiles = false
+    @Environment(WindowBrowserSortStore.self) private var windowSort
 
     private var path: URL { navigation.current }
 
@@ -73,7 +71,21 @@ struct FileBrowserView: View {
             }
             return entries
         }()
-        return base.sorted(using: sortOrder)
+        return BrowserSort.sorted(base, by: windowSort.descriptor)
+    }
+
+    private var tableSortOrder: Binding<[KeyPathComparator<FileEntry>]> {
+        Binding(
+            get: { BrowserSort.tableSortOrder(for: windowSort.descriptor) },
+            set: { newValue in
+                if let next = BrowserSort.descriptor(
+                    from: newValue,
+                    keepingFoldersOnTop: windowSort.descriptor.keepFoldersOnTop
+                ) {
+                    windowSort.descriptor = next
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -411,7 +423,7 @@ struct FileBrowserView: View {
             FileTableView(
                 entries: entries,
                 selection: $selection,
-                sortOrder: $sortOrder,
+                sortOrder: tableSortOrder,
                 renamingURL: $renamingURL,
                 renameDraft: $renameDraft,
                 settings: displaySettings,

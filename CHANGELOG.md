@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.4] — 2026-08-11
+
+### Added
+
+- **Sort By** — toolbar menu, View → Sort By, and list column headers; Name / Kind / Date Modified / Date Created / Size, plus Keep Folders on Top; shared live across split panes and tabs in the same window
+
+### Changed
+
+- Hidden files shown via Show Hidden Files now render at Finder-like **semi-transparent** opacity in list and icon views
+
 ## [1.4.3] — 2026-08-11
 
 ### Added
@@ -111,7 +121,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.4
 [1.4.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.3
 [1.4.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.2
 [1.4.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.1

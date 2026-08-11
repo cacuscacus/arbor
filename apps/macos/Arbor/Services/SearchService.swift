@@ -27,6 +27,7 @@ struct SearchHit: Identifiable, Hashable, Sendable {
                 name: name,
                 isDirectory: isDirectory,
                 isPackage: isPackage,
+                isHidden: name.hasPrefix("."),
                 size: 0,
                 kind: isDirectory ? "Folder" : "Document",
                 modified: nil,

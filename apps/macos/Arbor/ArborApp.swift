@@ -47,6 +47,8 @@ struct ArborApp: App {
                 Divider()
                 HiddenFilesCommands()
                 Divider()
+                SortByCommands()
+                Divider()
                 TerminalVisibilityCommands()
                 Divider()
                 IconViewCommands()
@@ -139,6 +141,22 @@ private struct HiddenFilesCommands: View {
         Toggle("Show Hidden Files", isOn: $showHiddenFiles)
             .keyboardShortcut(".", modifiers: [.command, .shift])
             .help("Show files and folders normally hidden by the system (Finder ⌘⇧.)")
+    }
+}
+
+private struct SortByCommands: View {
+    @FocusedValue(\.windowBrowserSort) private var windowSort
+
+    var body: some View {
+        Menu("Sort By") {
+            if let windowSort {
+                BrowserSortMenuContent(store: windowSort)
+            } else {
+                Text("Sort By")
+                    .disabled(true)
+            }
+        }
+        .disabled(windowSort == nil)
     }
 }
 
