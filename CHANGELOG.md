@@ -11,6 +11,12 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-08-11
+
+### Added
+
+- **Show Hidden Files** — View menu toggle and Finder-style **⌘⇧.**; preference is app-wide and persisted across launches (listings and search)
+
 ## [1.4.2] — 2026-08-07
 
 ### Fixed
@@ -105,7 +111,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.3
 [1.4.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.2
 [1.4.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.1
 [1.4.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.0

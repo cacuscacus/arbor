@@ -45,6 +45,8 @@ struct ArborApp: App {
             CommandMenu("View") {
                 SplitViewCommands()
                 Divider()
+                HiddenFilesCommands()
+                Divider()
                 TerminalVisibilityCommands()
                 Divider()
                 IconViewCommands()
@@ -127,6 +129,16 @@ private struct SplitViewCommands: View {
             tab?.closeSplit()
         }
         .disabled(tab?.isSplit != true)
+    }
+}
+
+private struct HiddenFilesCommands: View {
+    @AppStorage(HiddenFilesPreference.key) private var showHiddenFiles = false
+
+    var body: some View {
+        Toggle("Show Hidden Files", isOn: $showHiddenFiles)
+            .keyboardShortcut(".", modifiers: [.command, .shift])
+            .help("Show files and folders normally hidden by the system (Finder ⌘⇧.)")
     }
 }
 

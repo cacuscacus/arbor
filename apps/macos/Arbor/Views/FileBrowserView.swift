@@ -45,6 +45,7 @@ struct FileBrowserView: View {
 
     @FocusState private var listFocused: Bool
     @FocusState private var searchFocused: Bool
+    @AppStorage(HiddenFilesPreference.key) private var showHiddenFiles = false
 
     private var path: URL { navigation.current }
 
@@ -177,6 +178,13 @@ struct FileBrowserView: View {
             // Cheap catch-up if a DispatchSource event was missed while unfocused.
             guard isVisible, !isSearchActive else { return }
             reload()
+        }
+        .onChange(of: showHiddenFiles) { _, _ in
+            if isSearchActive {
+                scheduleSearch()
+            } else {
+                reload()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: BrowserListingDidChange.name)) { note in
             handleRemoteListingChange(BrowserListingDidChange.folders(from: note))
@@ -609,6 +617,7 @@ struct FileBrowserView: View {
         let query = trimmed
         let scope = searchScope
         let folder = path
+        let includeHidden = showHiddenFiles
         isSearching = true
         searchError = nil
 
@@ -620,7 +629,8 @@ struct FileBrowserView: View {
                 let hits = try await SearchService.search(
                     query: query,
                     scope: scope,
-                    currentFolder: folder
+                    currentFolder: folder,
+                    showHiddenFiles: includeHidden
                 )
                 guard !Task.isCancelled else { return }
                 searchHits = hits
@@ -671,7 +681,7 @@ struct FileBrowserView: View {
 
     private func reload() {
         do {
-            entries = try LocalFileService.list(path: path)
+            entries = try LocalFileService.list(path: path, showHiddenFiles: showHiddenFiles)
             errorMessage = nil
             pruneSelection(to: Set(entries.map(\.id)))
         } catch {

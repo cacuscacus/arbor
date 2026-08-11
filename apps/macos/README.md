@@ -82,6 +82,7 @@ Menu commands live in `Arbor/ArborApp.swift` (`.commands`). **v1.0.0 requires ma
 - Right-click a folder (browser or Favorites) → **Open in New Window**
 - **Tabs** float as a glass pill island in the **detail column** (sidebar stays full-height): open with ⌘T or the **+** control; close with ⌘W (last tab closes the window); pill island appears once you have more than one tab
 - **Split**: View → Toggle Split (⌘\) / **Open in Split** on folders; sidebar drives the focused pane
+- **Show Hidden Files**: View menu or Finder-style **⌘⇧.** — app-wide and persisted across launches
 - **Session restore**: quit/relaunch restores frames, tabs, and split pane folders (`~/Library/Application Support/Arbor/session.json`)
 - **Embedded terminal** (⌘J / ⌃\`): SwiftTerm PTY with Follow Folder + Restart; canvas insets text from the edges
 

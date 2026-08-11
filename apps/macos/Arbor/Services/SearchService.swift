@@ -94,7 +94,8 @@ enum SearchService {
     nonisolated static func search(
         query: String,
         scope: SearchScope,
-        currentFolder: URL
+        currentFolder: URL,
+        showHiddenFiles: Bool = false
     ) async throws -> [SearchHit] {
         let pattern = FilenameSearchPattern(query)
         guard !pattern.isEmpty else { return [] }
@@ -110,7 +111,11 @@ enum SearchService {
             }
         }()
 
-        if let hits = try await searchWithFd(pattern: pattern, root: root) {
+        if let hits = try await searchWithFd(
+            pattern: pattern,
+            root: root,
+            showHiddenFiles: showHiddenFiles
+        ) {
             return hits
         }
 
@@ -118,7 +123,11 @@ enum SearchService {
             return hits
         }
 
-        return try await searchWithEnumerator(pattern: pattern, root: root)
+        return try await searchWithEnumerator(
+            pattern: pattern,
+            root: root,
+            showHiddenFiles: showHiddenFiles
+        )
     }
 
     // MARK: - fd
@@ -127,7 +136,8 @@ enum SearchService {
     /// substrings stay `--fixed-strings`. Both stay O(tree) with ignore rules and an early cap.
     nonisolated private static func searchWithFd(
         pattern: FilenameSearchPattern,
-        root: URL
+        root: URL,
+        showHiddenFiles: Bool
     ) async throws -> [SearchHit]? {
         guard let fd = resolveFdPath() else { return nil }
 
@@ -141,6 +151,9 @@ enum SearchService {
             "--exclude", "target",
             "--exclude", ".build",
         ]
+        if showHiddenFiles {
+            arguments.append("--hidden")
+        }
 
         let query: String
         switch pattern.kind {
@@ -228,17 +241,22 @@ enum SearchService {
 
     nonisolated private static func searchWithEnumerator(
         pattern: FilenameSearchPattern,
-        root: URL
+        root: URL,
+        showHiddenFiles: Bool
     ) async throws -> [SearchHit] {
         let rootPath = root.path
 
         return try await Task.detached(priority: .userInitiated) {
             var hits: [SearchHit] = []
             let fm = FileManager.default
+            var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
+            if !showHiddenFiles {
+                options.insert(.skipsHiddenFiles)
+            }
             guard let enumerator = fm.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey, .nameKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                options: options
             ) else {
                 return []
             }

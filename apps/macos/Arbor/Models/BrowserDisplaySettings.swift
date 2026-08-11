@@ -263,6 +263,16 @@ final class BrowserDisplaySettings {
     }
 }
 
+/// App-wide, persisted Finder-style hidden-files visibility (all windows / tabs / panes).
+enum HiddenFilesPreference {
+    static let key = "arbor.browser.showHiddenFiles"
+
+    static var showHiddenFiles: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 // MARK: - Focused values for menu commands
 
 private struct BrowserDisplaySettingsFocusedKey: FocusedValueKey {

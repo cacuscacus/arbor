@@ -106,11 +106,15 @@ enum LocalFileService {
         .creationDateKey,
     ]
 
-    static func list(path: URL) throws -> [FileEntry] {
+    static func list(path: URL, showHiddenFiles: Bool = false) throws -> [FileEntry] {
+        var options: FileManager.DirectoryEnumerationOptions = []
+        if !showHiddenFiles {
+            options.insert(.skipsHiddenFiles)
+        }
         let contents = try FileManager.default.contentsOfDirectory(
             at: path,
             includingPropertiesForKeys: Array(listKeys),
-            options: [.skipsHiddenFiles]
+            options: options
         )
 
         var entries: [FileEntry] = contents.compactMap { makeEntry(from: $0, location: ".") }

@@ -252,6 +252,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
 - ✓ [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1) — live folder listing refresh for visible panes
 - ✓ [v1.4.2](https://github.com/cacuscacus/arbor/releases/tag/v1.4.2) — Dock New Window opens on the current virtual desktop
+- ✓ [v1.4.3](https://github.com/cacuscacus/arbor/releases/tag/v1.4.3) — Show Hidden Files (⌘⇧., persisted)
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
 - ✓ In-app **Check for Updates…** via GitHub Releases API (no Sparkle)
 - ⬚ Broader macOS deployment target (still requires macOS 26 / Tahoe APIs)
@@ -271,6 +272,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.4.0 agent runners (Phase 2b)
 ✓ v1.4.1 live folder listing refresh
 ✓ v1.4.2 Dock New Window on current Space
+✓ v1.4.3 Show Hidden Files (⌘⇧.)
   → next: quick diff / Git (Phase 4), browser polish,
      richer terminal sessions → remotes / preview → Linux / Windows
 ```
