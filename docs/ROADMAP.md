@@ -252,6 +252,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
 - ✓ [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1) — live folder listing refresh for visible panes
 - ✓ [v1.4.2](https://github.com/cacuscacus/arbor/releases/tag/v1.4.2) — Dock New Window opens on the current virtual desktop
+- ✓ [v1.4.5](https://github.com/cacuscacus/arbor/releases/tag/v1.4.5) — smoother scrolling + AppKit icon virtualization
 - ✓ [v1.4.4](https://github.com/cacuscacus/arbor/releases/tag/v1.4.4) — Sort By + Finder-like hidden-file dimming
 - ✓ [v1.4.3](https://github.com/cacuscacus/arbor/releases/tag/v1.4.3) — Show Hidden Files (⌘⇧., persisted)
 - ✓ Centralized [`CHANGELOG.md`](../CHANGELOG.md) + in-app **Help → Release History** (fetches from GitHub `main`)
@@ -273,6 +274,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.4.0 agent runners (Phase 2b)
 ✓ v1.4.1 live folder listing refresh
 ✓ v1.4.2 Dock New Window on current Space
+✓ v1.4.5 smoother scrolling + AppKit icons
 ✓ v1.4.4 Sort By + hidden-file dimming
 ✓ v1.4.3 Show Hidden Files (⌘⇧.)
   → next: quick diff / Git (Phase 4), browser polish,

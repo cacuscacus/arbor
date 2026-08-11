@@ -264,10 +264,72 @@ final class FileDragState {
 }
 
 enum FileIcon {
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 2_048
+        cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
+
+    private static let queue = DispatchQueue(
+        label: "cacus.Arbor.FileIcon",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+
+    private static func cacheKey(for url: URL, size: CGFloat) -> NSString {
+        let clamped = max(8, size.rounded())
+        return "\(url.standardizedFileURL.path)|\(Int(clamped * 2))" as NSString
+    }
+
+    /// Synchronous cache lookup only (never hits Icon Services).
+    static func cached(for url: URL, size: CGFloat) -> NSImage? {
+        cache.object(forKey: cacheKey(for: url, size: size))
+    }
+
+    /// Cached, resized file icon. Never mutates the shared `NSWorkspace` image.
     static func image(for url: URL, size: CGFloat) -> NSImage {
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: size, height: size)
+        let clamped = max(8, size.rounded())
+        let key = cacheKey(for: url, size: clamped)
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let workspaceIcon = NSWorkspace.shared.icon(forFile: url.path)
+        let icon = (workspaceIcon.copy() as? NSImage) ?? workspaceIcon
+        icon.size = NSSize(width: clamped, height: clamped)
+        let cost = Int(clamped * clamped * 16)
+        cache.setObject(icon, forKey: key, cost: cost)
         return icon
+    }
+
+    /// Cache hit → completion immediately on the calling queue; miss loads off-main.
+    static func load(for url: URL, size: CGFloat, completion: @escaping (NSImage) -> Void) {
+        if let cached = cached(for: url, size: size) {
+            completion(cached)
+            return
+        }
+        queue.async {
+            let icon = image(for: url, size: size)
+            DispatchQueue.main.async {
+                completion(icon)
+            }
+        }
+    }
+
+    /// Warm icons for the first chunk of a listing (icon view scroll warm-up).
+    static func prefetch(urls: [URL], size: CGFloat, limit: Int = 120) {
+        let batch = Array(urls.prefix(limit))
+        guard !batch.isEmpty else { return }
+        queue.async {
+            for url in batch {
+                _ = image(for: url, size: size)
+            }
+        }
+    }
+
+    static func clearCache() {
+        cache.removeAllObjects()
     }
 }
 

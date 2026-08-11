@@ -28,6 +28,8 @@ final class BrowserNavigation {
     private var forwardStack: [FolderHistoryEntry] = []
 
     /// Live vertical scroll for the open folder (kept current by the browser views).
+    /// Ignored by Observation so scroll ticks do not invalidate SwiftUI (major jank source).
+    @ObservationIgnored
     var scrollY: CGFloat = 0
 
     private(set) var pendingScrollRestore: FolderScrollRestore?

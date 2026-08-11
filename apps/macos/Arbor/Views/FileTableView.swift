@@ -186,228 +186,33 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     var onRequestRename: (FileEntry) -> Void
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
+    var onDeleteSelection: (() -> Void)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
 
-    @State private var anchorID: URL?
-    @State private var lastClickID: URL?
-    @State private var lastClickAt: Date = .distantPast
-    /// Tight icon+label hit rects — not the full cell padding box.
-    @State private var itemHitAreas: [URL: IconHitArea] = [:]
-    @State private var marqueeStart: CGPoint?
-    @State private var marqueeCurrent: CGPoint?
-    @State private var dropTarget: URL?
-
-    private var columns: [GridItem] {
-        [
-            GridItem(
-                .adaptive(minimum: iconMetrics.gridMinimum, maximum: iconMetrics.gridMaximum),
-                spacing: iconMetrics.gridSpacing
-            ),
-        ]
-    }
-
-    private var marqueeRect: CGRect? {
-        guard let start = marqueeStart, let current = marqueeCurrent else { return nil }
-        return CGRect(
-            x: min(start.x, current.x),
-            y: min(start.y, current.y),
-            width: abs(current.x - start.x),
-            height: abs(current.y - start.y)
-        )
-    }
-
     var body: some View {
-        GeometryReader { viewport in
-            ScrollView {
-                ZStack(alignment: .topLeading) {
-                    Color.clear
-                        .frame(
-                            minWidth: viewport.size.width,
-                            minHeight: max(viewport.size.height, gridMinHeight),
-                            alignment: .topLeading
-                        )
-                        .contentShape(Rectangle())
-                        .contextMenu { emptySpaceMenu() }
-                        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
-                        .onTapGesture(count: 1) {
-                            clearSelectionIfNeeded()
-                        }
-                        .gesture(marqueeGesture)
-
-                    LazyVGrid(columns: columns, spacing: iconMetrics.gridSpacing) {
-                        ForEach(entries) { entry in
-                            IconCell(
-                                entry: entry,
-                                isSelected: selection.contains(entry.id),
-                                isDropTarget: dropTarget == entry.id,
-                                isRenaming: renamingURL == entry.id,
-                                renameDraft: $renameDraft,
-                                metrics: iconMetrics,
-                                onIconTap: { handleIconClick(entry) },
-                                onNameTap: { onRequestRename(entry) },
-                                onCommitRename: onCommitRename,
-                                onCancelRename: onCancelRename,
-                                contextMenu: { contextMenu(entry) },
-                                dragProvider: {
-                                    fileDragItemProvider(
-                                        for: entry,
-                                        selection: $selection,
-                                        dragState: dragState
-                                    )
-                                },
-                                dropDelegate: entry.isBrowsable
-                                    ? FolderDropDelegate(
-                                        destination: entry.id,
-                                        dragState: dragState,
-                                        isTargeted: Binding(
-                                            get: { dropTarget == entry.id },
-                                            set: { active in
-                                                if active {
-                                                    dropTarget = entry.id
-                                                } else if dropTarget == entry.id {
-                                                    dropTarget = nil
-                                                }
-                                            }
-                                        ),
-                                        onTransfer: onTransfer
-                                    )
-                                    : nil
-                            )
-                            .gridCellAnchor(.top)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .onPreferenceChange(IconHitPreferenceKey.self) { itemHitAreas = $0 }
-                }
-                .frame(
-                    minWidth: viewport.size.width,
-                    minHeight: viewport.size.height,
-                    alignment: .topLeading
-                )
-                .coordinateSpace(name: "iconCanvas")
-                .overlay(alignment: .topLeading) {
-                    if let marqueeRect {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.accentColor.opacity(0.12))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 2)
-                                    .stroke(Color.accentColor.opacity(0.85), lineWidth: 1)
-                            }
-                            .frame(width: marqueeRect.width, height: marqueeRect.height)
-                            .offset(x: marqueeRect.minX, y: marqueeRect.minY)
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
-        }
+        // AppKit NSCollectionView — SwiftUI LazyVGrid cannot match Finder scroll cost.
+        IconCollectionView(
+            entries: entries,
+            selection: $selection,
+            renamingURL: $renamingURL,
+            renameDraft: $renameDraft,
+            iconMetrics: iconMetrics,
+            currentFolder: currentFolder,
+            dragState: dragState,
+            onOpen: onOpen,
+            onTransfer: onTransfer,
+            onRequestRename: onRequestRename,
+            onCommitRename: onCommitRename,
+            onCancelRename: onCancelRename,
+            onDeleteSelection: onDeleteSelection,
+            contextMenu: contextMenu,
+            emptySpaceMenu: emptySpaceMenu
+        )
         .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background(.background)
         .focusEffectDisabled()
-        .onChange(of: entries.map(\.id)) { _, ids in
-            let valid = Set(ids)
-            itemHitAreas = itemHitAreas.filter { valid.contains($0.key) }
-        }
-    }
-
-    private var gridMinHeight: CGFloat {
-        let approxColumns = max(1, Int(floor(800 / Double(iconMetrics.cellWidth + iconMetrics.gridSpacing))))
-        let rows = max(1, Int(ceil(Double(entries.count) / Double(approxColumns))))
-        return CGFloat(rows) * (iconMetrics.cellHeight + iconMetrics.gridSpacing) + 32
-    }
-
-    private var marqueeGesture: some Gesture {
-        DragGesture(minimumDistance: 5, coordinateSpace: .named("iconCanvas"))
-            .onChanged { value in
-                if marqueeStart == nil {
-                    // Only treat as item-drag if the press landed on icon/label, not cell padding.
-                    if hitsItem(at: value.startLocation) { return }
-                    marqueeStart = value.startLocation
-                    if !NSEvent.modifierFlags.contains(.command) {
-                        selection.removeAll()
-                    }
-                }
-                guard marqueeStart != nil else { return }
-                marqueeCurrent = value.location
-                applyMarqueeSelection()
-            }
-            .onEnded { _ in
-                marqueeStart = nil
-                marqueeCurrent = nil
-            }
-    }
-
-    private func hitsItem(at point: CGPoint) -> Bool {
-        itemHitAreas.values.contains { $0.contains(point) }
-    }
-
-    private func clearSelectionIfNeeded() {
-        if renamingURL != nil {
-            onCancelRename()
-        }
-        selection.removeAll()
-        lastClickID = nil
-    }
-
-    private func applyMarqueeSelection() {
-        guard let rect = marqueeRect else { return }
-        let hits = itemHitAreas.compactMap { id, area -> URL? in
-            area.intersects(rect) ? id : nil
-        }
-        if NSEvent.modifierFlags.contains(.command) {
-            selection.formUnion(hits)
-        } else {
-            selection = Set(hits)
-        }
-    }
-
-    private func handleIconClick(_ entry: FileEntry) {
-        if marqueeStart != nil { return }
-        if renamingURL != nil {
-            onCancelRename()
-        }
-
-        let modifiers = NSEvent.modifierFlags
-        let now = Date()
-
-        if modifiers.contains(.command) {
-            if selection.contains(entry.id) {
-                selection.remove(entry.id)
-            } else {
-                selection.insert(entry.id)
-            }
-            anchorID = entry.id
-            lastClickID = entry.id
-            lastClickAt = now
-            return
-        }
-
-        if modifiers.contains(.shift), let anchorID,
-           let anchorIndex = entries.firstIndex(where: { $0.id == anchorID }),
-           let index = entries.firstIndex(where: { $0.id == entry.id })
-        {
-            let range = anchorIndex <= index ? anchorIndex...index : index...anchorIndex
-            selection = Set(entries[range].map(\.id))
-            lastClickID = entry.id
-            lastClickAt = now
-            return
-        }
-
-        if selection == [entry.id],
-           lastClickID == entry.id,
-           now.timeIntervalSince(lastClickAt) < 0.45
-        {
-            onOpen(entry)
-            lastClickID = nil
-            return
-        }
-
-        selection = [entry.id]
-        anchorID = entry.id
-        lastClickID = entry.id
-        lastClickAt = now
     }
 }
 
@@ -416,145 +221,33 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
 struct FileIconImage: View {
     let url: URL
     let size: CGFloat
+    @State private var image: NSImage?
 
     var body: some View {
-        Image(nsImage: FileIcon.image(for: url, size: size))
-            .resizable()
-            .interpolation(.high)
-            .frame(width: size, height: size)
-    }
-}
-
-/// Tight hit region: icon thumbnail and/or name label only.
-struct IconHitArea: Equatable {
-    var icon: CGRect = .null
-    var label: CGRect = .null
-
-    func contains(_ point: CGPoint) -> Bool {
-        (!icon.isNull && icon.insetBy(dx: -1, dy: -1).contains(point))
-            || (!label.isNull && label.insetBy(dx: -1, dy: -1).contains(point))
-    }
-
-    func intersects(_ rect: CGRect) -> Bool {
-        (!icon.isNull && icon.intersects(rect))
-            || (!label.isNull && label.intersects(rect))
-    }
-}
-
-private struct IconCell<MenuContent: View>: View {
-    let entry: FileEntry
-    let isSelected: Bool
-    var isDropTarget: Bool = false
-    var isRenaming: Bool = false
-    @Binding var renameDraft: String
-    var metrics: IconViewMetrics
-    var onIconTap: () -> Void
-    var onNameTap: () -> Void
-    var onCommitRename: () -> Void
-    var onCancelRename: () -> Void
-    @ViewBuilder var contextMenu: () -> MenuContent
-    var dragProvider: () -> NSItemProvider
-    var dropDelegate: FolderDropDelegate?
-
-    var body: some View {
-        // Layout-only host: empty padding must not swallow clicks / marquee.
-        Color.clear
-            .frame(width: metrics.cellWidth, height: metrics.cellHeight)
-            .allowsHitTesting(false)
-            .overlay(alignment: .top) {
-                interactiveContent
-            }
-    }
-
-    @ViewBuilder
-    private var interactiveContent: some View {
-        let content = VStack(spacing: 6) {
-            FileIconImage(url: entry.id, size: metrics.iconPoints)
-                .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onIconTap)
-                .background(hitProbe(part: .icon))
-
-            if isRenaming {
-                RenameTextField(
-                    text: $renameDraft,
-                    isDirectory: entry.isDirectory && !entry.isPackage,
-                    onSubmit: onCommitRename,
-                    onCancel: onCancelRename
-                )
-                .frame(width: metrics.labelWidth)
-                .background(hitProbe(part: .label))
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(size >= 48 ? .high : .medium)
             } else {
-                Text(entry.name)
-                    .font(.system(size: metrics.labelFontSize))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(metrics.lineLimit)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.accentColor)
-                        }
-                    }
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                    .frame(maxWidth: metrics.labelWidth, alignment: .top)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onNameTap)
-                    .background(hitProbe(part: .label))
+                Image(systemName: "doc")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(.secondary)
+                    .padding(size >= 32 ? 6 : 1)
             }
         }
-        .padding(.top, 6)
-        .padding(.horizontal, 4)
-        .opacity(entry.listingOpacity)
-        .background {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isDropTarget ? Color.accentColor.opacity(0.14) : Color.clear)
-                .allowsHitTesting(false)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isDropTarget ? Color.accentColor : Color.clear, lineWidth: 1.5)
-                .allowsHitTesting(false)
-        }
-        .contextMenu { contextMenu() }
-        .onDrag(dragProvider)
-
-        if let dropDelegate {
-            content.onDrop(of: [.fileURL], delegate: dropDelegate)
-        } else {
-            content
-        }
-    }
-
-    private enum HitPart { case icon, label }
-
-    private func hitProbe(part: HitPart) -> some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: IconHitPreferenceKey.self,
-                value: [
-                    entry.id: IconHitArea(
-                        icon: part == .icon ? geo.frame(in: .named("iconCanvas")) : .null,
-                        label: part == .label ? geo.frame(in: .named("iconCanvas")) : .null
-                    ),
-                ]
-            )
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-private struct IconHitPreferenceKey: PreferenceKey {
-    static var defaultValue: [URL: IconHitArea] = [:]
-
-    static func reduce(value: inout [URL: IconHitArea], nextValue: () -> [URL: IconHitArea]) {
-        for (id, area) in nextValue() {
-            var merged = value[id] ?? IconHitArea()
-            if !area.icon.isNull { merged.icon = area.icon }
-            if !area.label.isNull { merged.label = area.label }
-            value[id] = merged
+        .frame(width: size, height: size)
+        .task(id: "\(url.path)|\(Int(size))") {
+            if let cached = FileIcon.cached(for: url, size: size) {
+                image = cached
+                return
+            }
+            image = await withCheckedContinuation { continuation in
+                FileIcon.load(for: url, size: size) { icon in
+                    continuation.resume(returning: icon)
+                }
+            }
         }
     }
 }

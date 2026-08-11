@@ -11,6 +11,17 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.5] — 2026-08-11
+
+### Changed
+
+- **Much smoother scrolling** in list and icon views — stop rebuilding the browser on every scroll tick; cache file icons; lighten scroll/install hot paths
+- **Icon view** now uses AppKit `NSCollectionView` virtualization (Finder-like) instead of SwiftUI `LazyVGrid`
+
+### Fixed
+
+- Icon-view keyboard Return/Delete when the grid has focus; drop onto folders in icon view
+
 ## [1.4.4] — 2026-08-11
 
 ### Added
@@ -121,7 +132,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.5...HEAD
+[1.4.5]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.5
 [1.4.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.4
 [1.4.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.3
 [1.4.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.2

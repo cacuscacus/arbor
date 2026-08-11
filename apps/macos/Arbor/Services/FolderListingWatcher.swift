@@ -36,7 +36,8 @@ final class FolderListingWatcher {
 
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .delete, .rename, .attrib, .extend, .link, .revoke],
+            // Omit `.attrib` / `.extend` — Spotlight, xattrs, and thumbnailers make these noisy.
+            eventMask: [.write, .delete, .rename, .link, .revoke],
             queue: .main
         )
         src.setEventHandler { [weak self] in

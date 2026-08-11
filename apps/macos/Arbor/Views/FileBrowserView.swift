@@ -17,6 +17,8 @@ struct FileBrowserView: View {
     private var undoStack: ArborUndoStack { pane.undoStack }
 
     @State private var entries: [FileEntry] = []
+    /// Sorted listing / search results — recomputed only when inputs change.
+    @State private var visibleEntries: [FileEntry] = []
     @State private var selection = Set<URL>()
     @State private var errorMessage: String?
     @State private var details: FileDetails?
@@ -64,16 +66,6 @@ struct FileBrowserView: View {
         }
     }
 
-    private var visibleEntries: [FileEntry] {
-        let base: [FileEntry] = {
-            if isSearchActive {
-                return searchHits.map { $0.asFileEntry() }
-            }
-            return entries
-        }()
-        return BrowserSort.sorted(base, by: windowSort.descriptor)
-    }
-
     private var tableSortOrder: Binding<[KeyPathComparator<FileEntry>]> {
         Binding(
             get: { BrowserSort.tableSortOrder(for: windowSort.descriptor) },
@@ -86,6 +78,16 @@ struct FileBrowserView: View {
                 }
             }
         )
+    }
+
+    private func refreshVisibleEntries() {
+        let base: [FileEntry] = {
+            if isSearchActive {
+                return searchHits.map { $0.asFileEntry() }
+            }
+            return entries
+        }()
+        visibleEntries = BrowserSort.sorted(base, by: windowSort.descriptor)
     }
 
     var body: some View {
@@ -103,6 +105,10 @@ struct FileBrowserView: View {
     }
 
     private var browserScaffold: some View {
+        applyBrowserLifecycle(to: browserChrome)
+    }
+
+    private var browserChrome: some View {
         VStack(spacing: 0) {
             // Keep content swaps (browse ↔ search results) inside this slot so the
             // floating search overlay is NOT recreated with them — that was
@@ -150,129 +156,157 @@ struct FileBrowserView: View {
                 )
             }
         }
-        // Window toolbar / title live on `TabDetailView` (outside HSplitView) so Liquid
-        // Glass stays consistent across split panes. This view only reacts to chrome cmds.
         .modifier(FileBrowserFocusedSceneModifier(
             isActive: isActive,
             displaySettings: displaySettings,
             folderURL: navigation.current
         ))
-        .onChange(of: pane.chromeCommandToken) { _, _ in
-            guard isActive, let command = pane.consumeChromeCommand() else { return }
-            handleChromeCommand(command)
-        }
-        .onChange(of: navigation.current, initial: true) { _, url in
-            guard isActive else { return }
-            WindowLaunchCoordinator.noteFocusedFolder(url)
-        }
-        .onChange(of: isActive) { _, active in
-            if active {
-                WindowLaunchCoordinator.noteFocusedFolder(navigation.current)
-                if !isSearchPresented {
+    }
+
+    private func applyBrowserLifecycle<Content: View>(to content: Content) -> some View {
+        applyBrowserKeyHandling(
+            to: applyBrowserSheets(
+                to: applyBrowserListingObservers(
+                    to: applyBrowserSessionObservers(to: content)
+                )
+            )
+        )
+    }
+
+    private func applyBrowserSessionObservers<Content: View>(to content: Content) -> some View {
+        content
+            .onChange(of: pane.chromeCommandToken) { _, _ in
+                guard isActive, let command = pane.consumeChromeCommand() else { return }
+                handleChromeCommand(command)
+            }
+            .onChange(of: navigation.current, initial: true) { _, url in
+                guard isActive else { return }
+                WindowLaunchCoordinator.noteFocusedFolder(url)
+            }
+            .onChange(of: isActive) { _, active in
+                if active {
+                    WindowLaunchCoordinator.noteFocusedFolder(navigation.current)
+                    if !isSearchPresented {
+                        listFocused = true
+                    }
+                }
+            }
+            .onAppear {
+                reload()
+                if isActive, !isSearchPresented {
                     listFocused = true
                 }
             }
-        }
-        .onAppear {
-            reload()
-            if isActive, !isSearchPresented {
-                listFocused = true
+            .background {
+                FolderListingWatchActivator(
+                    path: (isVisible && !isSearchActive) ? path : nil
+                ) {
+                    reload()
+                }
             }
-        }
-        .background {
-            FolderListingWatchActivator(
-                path: (isVisible && !isSearchActive) ? path : nil
-            ) {
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                guard isVisible, !isSearchActive else { return }
                 reload()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            // Cheap catch-up if a DispatchSource event was missed while unfocused.
-            guard isVisible, !isSearchActive else { return }
-            reload()
-        }
-        .onChange(of: showHiddenFiles) { _, _ in
-            if isSearchActive {
-                scheduleSearch()
-            } else {
-                reload()
+    }
+
+    private func applyBrowserListingObservers<Content: View>(to content: Content) -> some View {
+        content
+            .onChange(of: showHiddenFiles) { _, _ in
+                if isSearchActive {
+                    scheduleSearch()
+                } else {
+                    reload()
+                }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: BrowserListingDidChange.name)) { note in
-            handleRemoteListingChange(BrowserListingDidChange.folders(from: note))
-        }
-        .onChange(of: navigation.current) { _, _ in
-            cancelRename()
-            selection = []
-            if searchScope == .currentFolder, isSearchActive {
-                scheduleSearch()
-            } else if !isSearchActive {
-                reload()
+            .onChange(of: searchHits) { _, _ in
+                refreshVisibleEntries()
             }
-            if !searchFocused && !isSearchPresented {
-                listFocused = true
+            .onChange(of: windowSort.descriptor) { _, _ in
+                refreshVisibleEntries()
             }
-        }
-        .onChange(of: selection) { _, _ in
-            selectionMarkedAt = Date()
-            if let renamingURL, !selection.contains(renamingURL) {
+            .onReceive(NotificationCenter.default.publisher(for: BrowserListingDidChange.name)) { note in
+                handleRemoteListingChange(BrowserListingDidChange.folders(from: note))
+            }
+            .onChange(of: navigation.current) { _, _ in
                 cancelRename()
-            }
-        }
-        .onChange(of: searchQuery) { _, _ in
-            scheduleSearch()
-        }
-        .onChange(of: searchScope) { _, _ in
-            if isSearchActive {
-                scheduleSearch()
-            }
-        }
-        .sheet(item: $details) { info in
-            FileDetailsView(details: info)
-        }
-        .sheet(item: $multiInfo) { info in
-            MultiSelectionInfoView(info: info)
-        }
-        .background {
-            shortcutButtons
-        }
-        .onKeyPress(keys: [.escape], phases: .down) { _ in
-            guard isActive else { return .ignored }
-            if renamingURL != nil {
-                cancelRename()
-                return .handled
-            }
-            if isSearchActive || searchFocused || isSearchPresented {
-                dismissSearch()
-                return .handled
-            }
-            if !selection.isEmpty {
                 selection = []
+                if searchScope == .currentFolder, isSearchActive {
+                    scheduleSearch()
+                } else if !isSearchActive {
+                    reload()
+                }
+                if !searchFocused && !isSearchPresented {
+                    listFocused = true
+                }
+            }
+            .onChange(of: selection) { _, _ in
+                selectionMarkedAt = Date()
+                if let renamingURL, !selection.contains(renamingURL) {
+                    cancelRename()
+                }
+            }
+            .onChange(of: searchQuery) { _, _ in
+                refreshVisibleEntries()
+                scheduleSearch()
+            }
+            .onChange(of: searchScope) { _, _ in
+                if isSearchActive {
+                    scheduleSearch()
+                }
+            }
+    }
+
+    private func applyBrowserSheets<Content: View>(to content: Content) -> some View {
+        content
+            .sheet(item: $details) { info in
+                FileDetailsView(details: info)
+            }
+            .sheet(item: $multiInfo) { info in
+                MultiSelectionInfoView(info: info)
+            }
+            .background {
+                shortcutButtons
+            }
+    }
+
+    private func applyBrowserKeyHandling<Content: View>(to content: Content) -> some View {
+        content
+            .onKeyPress(keys: [.escape], phases: .down) { _ in
+                guard isActive else { return .ignored }
+                if renamingURL != nil {
+                    cancelRename()
+                    return .handled
+                }
+                if isSearchActive || searchFocused || isSearchPresented {
+                    dismissSearch()
+                    return .handled
+                }
+                if !selection.isEmpty {
+                    selection = []
+                    return .handled
+                }
+                return .ignored
+            }
+            .onKeyPress(keys: [.init("/")], phases: .down) { _ in
+                guard isActive else { return .ignored }
+                if searchFocused { return .ignored }
+                presentSearch()
                 return .handled
             }
-            return .ignored
-        }
-        .onKeyPress(keys: [.init("/")], phases: .down) { _ in
-            guard isActive else { return .ignored }
-            if searchFocused { return .ignored }
-            presentSearch()
-            return .handled
-        }
-        .onKeyPress(.return) {
-            guard isActive else { return .ignored }
-            if renamingURL != nil || searchFocused { return .ignored }
-            return openSelection()
-        }
-        .onKeyPress(.delete) {
-            guard isActive else { return .ignored }
-            if renamingURL != nil || searchFocused { return .ignored }
-            return moveSelectionToTrash()
-        }
-        // Keep keyboard focus for shortcuts, but never draw the accent focus ring
-        // (it shows up as random light-blue lines, especially while resizing).
-        .focusable()
-        .focused($listFocused)
-        .focusEffectDisabled()
+            .onKeyPress(.return) {
+                guard isActive else { return .ignored }
+                if renamingURL != nil || searchFocused { return .ignored }
+                return openSelection()
+            }
+            .onKeyPress(.delete) {
+                guard isActive else { return .ignored }
+                if renamingURL != nil || searchFocused { return .ignored }
+                return moveSelectionToTrash()
+            }
+            .focusable()
+            .focused($listFocused)
+            .focusEffectDisabled()
     }
 
     private var floatingSearchPanel: some View {
@@ -459,6 +493,7 @@ struct FileBrowserView: View {
                 onRequestRename: handleNameClick,
                 onCommitRename: commitRename,
                 onCancelRename: cancelRename,
+                onDeleteSelection: { _ = moveSelectionToTrash() },
                 contextMenu: { entry in entryContextMenu(anchor: entry) },
                 emptySpaceMenu: { emptySpaceContextMenu }
             )
@@ -701,6 +736,7 @@ struct FileBrowserView: View {
             selection = []
             errorMessage = error.localizedDescription
         }
+        refreshVisibleEntries()
     }
 
     private func pruneSelection(to valid: Set<URL>) {

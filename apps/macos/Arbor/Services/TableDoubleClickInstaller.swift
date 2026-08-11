@@ -34,7 +34,9 @@ struct TableInteractionInstaller: NSViewRepresentable {
         context.coordinator.rowCount = rowCount
         context.coordinator.nameColumnIndex = nameColumnIndex
         nsView.coordinator = context.coordinator
-        nsView.scheduleInstall()
+        // Only re-hunt the NSTableView when installs fail or the table is gone —
+        // walking the view tree on every SwiftUI update was expensive during scroll.
+        nsView.scheduleInstallIfNeeded()
     }
 
     final class Coordinator: NSObject {
@@ -121,13 +123,20 @@ struct TableInteractionInstaller: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            scheduleInstall()
+            scheduleInstallIfNeeded()
         }
 
         deinit {
             if let dragMonitor {
                 NSEvent.removeMonitor(dragMonitor)
             }
+        }
+
+        func scheduleInstallIfNeeded() {
+            if let hookedTable, hookedTable.window != nil {
+                return
+            }
+            scheduleInstall()
         }
 
         func scheduleInstall() {

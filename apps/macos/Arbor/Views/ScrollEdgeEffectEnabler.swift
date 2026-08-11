@@ -8,6 +8,10 @@ import SwiftUI
 /// blur. On some hierarchies (notably the trailing `HSplitView` column) the edge
 /// effect only attaches once the scroll view has a vertical scroller enabled.
 struct ScrollEdgeEffectEnabler: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         view.isHidden = true
@@ -15,9 +19,18 @@ struct ScrollEdgeEffectEnabler: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        // Attach once per host view — walking the NSView tree on every SwiftUI
+        // update is wasteful and can hitch during scroll when parents invalidate.
+        guard !context.coordinator.didEnable else { return }
         DispatchQueue.main.async {
+            guard !context.coordinator.didEnable else { return }
             Self.enableNativeSoftEdge(near: nsView)
+            context.coordinator.didEnable = true
         }
+    }
+
+    final class Coordinator {
+        var didEnable = false
     }
 
     private static func enableNativeSoftEdge(near probe: NSView) {

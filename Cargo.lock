@@ -69,7 +69,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arbor-cli"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "arbor-core",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "arbor-core"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "ignore",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "arbor-ffi"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "arbor-core",
  "serde_json",

@@ -23,10 +23,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
-        DispatchQueue.main.async {
-            context.coordinator.attach(near: nsView)
-            context.coordinator.applyRestoreIfNeeded()
-        }
+        context.coordinator.scheduleSync(near: nsView)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -41,6 +38,25 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
         private var lastRestoreToken: UInt = 0
         private var isApplyingRestore = false
         private var stickyRestoreY: CGFloat?
+        private var syncScheduled = false
+
+        func scheduleSync(near probe: NSView) {
+            // Hot path: already attached and idle — skip tree walks / async hops.
+            if scrollView != nil,
+               stickyRestoreY == nil,
+               parent?.restoreToken == lastRestoreToken
+            {
+                return
+            }
+            guard !syncScheduled else { return }
+            syncScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.syncScheduled = false
+                self.attach(near: probe)
+                self.applyRestoreIfNeeded()
+            }
+        }
 
         func attach(near probe: NSView) {
             guard let found = Self.primaryVerticalScrollView(near: probe) else { return }
@@ -138,7 +154,7 @@ struct FolderScrollPositionBridge: NSViewRepresentable {
         private func publishScrollY() {
             guard !isApplyingRestore, let scrollView, let parent else { return }
             let y = Self.currentScrollY(scrollView)
-            if abs(parent.scrollY - y) > 0.5 {
+            if abs(parent.scrollY - y) > 2 {
                 parent.scrollY = y
             }
         }
