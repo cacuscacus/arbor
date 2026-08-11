@@ -440,17 +440,25 @@ final class IconCollectionNSView: NSCollectionView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if indexPathForItem(at: point) == nil {
-            window?.makeFirstResponder(self)
-            if !event.modifierFlags.contains(.command) {
-                eventHandler?.clearSelection()
+        // Layout cell frames are larger than Finder hit targets. Only treat icon/label
+        // as “on item”; padding starts marquee (precise collision like before).
+        if let indexPath = indexPathForItem(at: point),
+           let item = item(at: indexPath) as? IconCollectionItem
+        {
+            let local = item.view.convert(point, from: self)
+            if item.interactiveContains(local) {
+                window?.makeFirstResponder(self)
+                marqueeStart = nil
+                super.mouseDown(with: event)
+                return
             }
-            marqueeStart = point
-            return
         }
-        marqueeStart = nil
+
         window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
+        if !event.modifierFlags.contains(.command) {
+            eventHandler?.clearSelection()
+        }
+        marqueeStart = point
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -500,8 +508,9 @@ final class IconCollectionNSView: NSCollectionView {
     private func indexPathsForItems(in rect: CGRect) -> Set<IndexPath> {
         var hits = Set<IndexPath>()
         for indexPath in indexPathsForVisibleItems() {
-            guard let item = item(at: indexPath) else { continue }
-            if item.view.frame.intersects(rect) {
+            guard let item = item(at: indexPath) as? IconCollectionItem else { continue }
+            // Marquee must use icon/label rects, not the oversized layout cell.
+            if item.interactiveFrames(in: self).contains(where: { $0.intersects(rect) }) {
                 hits.insert(indexPath)
             }
         }
@@ -599,11 +608,15 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         iconWidthConstraint = width
         iconHeightConstraint = height
 
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         NSLayoutConstraint.activate([
-            selectionBackground.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 2),
-            selectionBackground.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -2),
-            selectionBackground.topAnchor.constraint(equalTo: view.topAnchor, constant: 2),
-            selectionBackground.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -2),
+            // Finder-like: selection plate hugs the icon, not the whole grid cell.
+            selectionBackground.leadingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -4),
+            selectionBackground.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
+            selectionBackground.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -4),
+            selectionBackground.bottomAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
 
             iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
             iconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -611,12 +624,13 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
             height,
 
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 6),
-            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -4),
 
             renameField.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
-            renameField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
-            renameField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            renameField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            renameField.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -8),
         ])
     }
 
@@ -640,6 +654,8 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         label.stringValue = entry.name
         label.font = .systemFont(ofSize: metrics.labelFontSize)
         label.maximumNumberOfLines = metrics.lineLimit
+        label.preferredMaxLayoutWidth = metrics.labelWidth
+        label.invalidateIntrinsicContentSize()
         iconWidthConstraint?.constant = metrics.iconPoints
         iconHeightConstraint?.constant = metrics.iconPoints
 
@@ -672,12 +688,14 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
 
     private func applySelectionChrome(selected: Bool) {
         if selected {
-            selectionBackground.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
+            // Subtle plate behind the icon only (Finder-like), accent chip on the name.
+            selectionBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.10).cgColor
             label.drawsBackground = true
             label.backgroundColor = .controlAccentColor
             label.textColor = .white
             label.wantsLayer = true
             label.layer?.cornerRadius = 4
+            label.layer?.masksToBounds = true
         } else {
             selectionBackground.layer?.backgroundColor = NSColor.clear.cgColor
             label.drawsBackground = false
@@ -752,6 +770,21 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
     func iconContains(_ point: NSPoint) -> Bool {
         iconView.frame.insetBy(dx: -2, dy: -2).contains(point)
     }
+
+    /// Icon / label / rename field only — cell padding is “empty space” for marquee.
+    func interactiveContains(_ point: NSPoint) -> Bool {
+        if !renameField.isHidden, renameField.frame.insetBy(dx: -2, dy: -2).contains(point) {
+            return true
+        }
+        return iconContains(point) || labelContains(point)
+    }
+
+    /// Icon + label frames in the collection view’s coordinate space (marquee hits).
+    func interactiveFrames(in collectionView: NSView) -> [NSRect] {
+        let icon = view.convert(iconView.frame.insetBy(dx: -2, dy: -2), to: collectionView)
+        let name = view.convert(label.frame.insetBy(dx: -2, dy: -2), to: collectionView)
+        return [icon, name]
+    }
 }
 
 private final class IconItemRootView: NSView {
@@ -760,6 +793,14 @@ private final class IconItemRootView: NSView {
     private var moved = false
     private var lastClickAt: Date?
 
+    /// Pass events through cell padding so the collection view can marquee / clear.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let item, !isHidden, frame.contains(point) else { return nil }
+        let local = convert(point, from: superview)
+        guard item.interactiveContains(local) else { return nil }
+        return super.hitTest(point) ?? self
+    }
+
     override func mouseDown(with event: NSEvent) {
         downAt = convert(event.locationInWindow, from: nil)
         moved = false
@@ -767,14 +808,19 @@ private final class IconItemRootView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let downAt else {
+        guard let downAt, let item else {
+            superview?.mouseDragged(with: event)
+            return
+        }
+        // Only start a file drag when the press began on icon/label.
+        guard item.interactiveContains(downAt) else {
             superview?.mouseDragged(with: event)
             return
         }
         let point = convert(event.locationInWindow, from: nil)
         if hypot(point.x - downAt.x, point.y - downAt.y) > 4 {
             moved = true
-            item?.beginFileDrag()
+            item.beginFileDrag()
             self.downAt = nil
             return
         }
