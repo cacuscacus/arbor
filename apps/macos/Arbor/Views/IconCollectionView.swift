@@ -30,12 +30,16 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
 
         let scroll = NSScrollView()
         scroll.drawsBackground = false
+        scroll.contentView.drawsBackground = false
+        // Vertical scroller required for Tahoe scroll-edge/underlap on AppKit scroll views.
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
+        // Content rests below the toolbar glass but can scroll underneath with soft edge.
         scroll.automaticallyAdjustsContentInsets = true
+        scroll.contentInsets = NSEdgeInsets()
 
         let collection = IconCollectionNSView()
         collection.eventHandler = coordinator

@@ -209,9 +209,12 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
             contextMenu: contextMenu,
             emptySpaceMenu: emptySpaceMenu
         )
+        // Reach under the toolbar glass like SwiftUI Table/list. Safe-area inset is
+        // applied by NSScrollView.automaticallyAdjustsContentInsets instead.
+        .ignoresSafeArea(.container, edges: .top)
         .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .background(.background)
+        // Do not paint an opaque `.background` here — it kills Liquid Glass underlap.
         .focusEffectDisabled()
     }
 }

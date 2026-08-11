@@ -11,6 +11,12 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.6] — 2026-08-11
+
+### Fixed
+
+- Restore Liquid Glass / soft scroll-edge underlap under the toolbar in **icon view** (AppKit grid was safe-area clipped and painted opaque)
+
 ## [1.4.5] — 2026-08-11
 
 ### Changed
@@ -132,7 +138,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.5...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.6...HEAD
+[1.4.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.6
 [1.4.5]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.5
 [1.4.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.4
 [1.4.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.3
