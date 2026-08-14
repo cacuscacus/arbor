@@ -244,12 +244,9 @@ struct FileIconImage: View {
         .task(id: "\(url.path)|\(Int(size))") {
             if let cached = FileIcon.cached(for: url, size: size) {
                 image = cached
-                return
             }
-            image = await withCheckedContinuation { continuation in
-                FileIcon.load(for: url, size: size) { icon in
-                    continuation.resume(returning: icon)
-                }
+            FileIcon.load(for: url, size: size) { display in
+                image = display.image
             }
         }
     }

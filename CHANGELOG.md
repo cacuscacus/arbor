@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.8] — 2026-08-14
+
+### Added
+
+- Icon view shows **Quick Look thumbnails** for images, PDFs, and videos (Finder-like content previews); list view keeps compact type icons
+
+### Fixed
+
+- Selection chrome hugs the thumbnail’s aspect ratio instead of filling the grid cell
+
 ## [1.4.7] — 2026-08-11
 
 ### Fixed
@@ -144,7 +154,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.7...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.8...HEAD
+[1.4.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.8
 [1.4.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.7
 [1.4.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.6
 [1.4.5]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.5

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import QuickLookThumbnailing
 import SwiftUI
 
 enum FileTransferOperation {
@@ -264,6 +265,32 @@ final class FileDragState {
 }
 
 enum FileIcon {
+    /// Icon-view sizes request Quick Look content thumbnails; list/breadcrumb sizes stay type icons.
+    static let thumbnailMinPoints: CGFloat = 32
+
+    struct Display {
+        let image: NSImage
+        let isContentPreview: Bool
+    }
+
+    /// Cancels an in-flight Quick Look request when a collection item is reused.
+    final class Request {
+        fileprivate var cancelled = false
+        fileprivate var qlRequest: QLThumbnailGenerator.Request?
+
+        func cancel() {
+            cancelled = true
+            if let qlRequest {
+                QLThumbnailGenerator.shared.cancel(qlRequest)
+            }
+        }
+    }
+
+    private enum Kind: String {
+        case typeIcon = "icon"
+        case thumbnail = "thumb"
+    }
+
     private static let cache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 2_048
@@ -277,20 +304,31 @@ enum FileIcon {
         attributes: .concurrent
     )
 
-    private static func cacheKey(for url: URL, size: CGFloat) -> NSString {
+    private static func cacheKey(_ kind: Kind, url: URL, size: CGFloat) -> NSString {
         let clamped = max(8, size.rounded())
-        return "\(url.standardizedFileURL.path)|\(Int(clamped * 2))" as NSString
+        return "\(url.standardizedFileURL.path)|\(kind.rawValue)|\(Int(clamped * 2))" as NSString
     }
 
-    /// Synchronous cache lookup only (never hits Icon Services).
+    /// Best available cached image: content thumbnail if present, otherwise type icon.
     static func cached(for url: URL, size: CGFloat) -> NSImage? {
-        cache.object(forKey: cacheKey(for: url, size: size))
+        cachedDisplay(for: url, size: size)?.image
     }
 
-    /// Cached, resized file icon. Never mutates the shared `NSWorkspace` image.
+    static func cachedDisplay(for url: URL, size: CGFloat) -> Display? {
+        let clamped = max(8, size.rounded())
+        if let thumb = cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) {
+            return Display(image: thumb, isContentPreview: true)
+        }
+        if let icon = cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) {
+            return Display(image: icon, isContentPreview: false)
+        }
+        return nil
+    }
+
+    /// Cached, resized **type** icon (Icon Services). Never mutates the shared `NSWorkspace` image.
     static func image(for url: URL, size: CGFloat) -> NSImage {
         let clamped = max(8, size.rounded())
-        let key = cacheKey(for: url, size: clamped)
+        let key = cacheKey(.typeIcon, url: url, size: clamped)
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -298,26 +336,54 @@ enum FileIcon {
         let workspaceIcon = NSWorkspace.shared.icon(forFile: url.path)
         let icon = (workspaceIcon.copy() as? NSImage) ?? workspaceIcon
         icon.size = NSSize(width: clamped, height: clamped)
-        let cost = Int(clamped * clamped * 16)
-        cache.setObject(icon, forKey: key, cost: cost)
+        cache.setObject(icon, forKey: key, cost: Int(clamped * clamped * 4))
         return icon
     }
 
-    /// Cache hit → completion immediately on the calling queue; miss loads off-main.
-    static func load(for url: URL, size: CGFloat, completion: @escaping (NSImage) -> Void) {
-        if let cached = cached(for: url, size: size) {
-            completion(cached)
-            return
-        }
-        queue.async {
-            let icon = image(for: url, size: size)
+    /// Type icon immediately, then a Quick Look thumbnail when the size and file type warrant it.
+    /// `completion` may fire more than once (placeholder, then preview). Always delivered on the main queue.
+    @discardableResult
+    static func load(
+        for url: URL,
+        size: CGFloat,
+        completion: @escaping (Display) -> Void
+    ) -> Request {
+        let request = Request()
+        let clamped = max(8, size.rounded())
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+
+        let deliver: (Display) -> Void = { display in
             DispatchQueue.main.async {
-                completion(icon)
+                guard !request.cancelled else { return }
+                completion(display)
             }
         }
+
+        if let thumb = cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) {
+            completion(Display(image: thumb, isContentPreview: true))
+            return request
+        }
+        if let icon = cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) {
+            completion(Display(image: icon, isContentPreview: false))
+        }
+
+        let wantsThumbnail = clamped >= thumbnailMinPoints
+        queue.async {
+            guard !request.cancelled else { return }
+
+            if cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) == nil {
+                let icon = image(for: url, size: clamped)
+                deliver(Display(image: icon, isContentPreview: false))
+            }
+
+            guard wantsThumbnail, !request.cancelled, isPreviewable(url) else { return }
+            if cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) != nil { return }
+            requestThumbnail(url: url, size: clamped, scale: scale, request: request, deliver: deliver)
+        }
+        return request
     }
 
-    /// Warm icons for the first chunk of a listing (icon view scroll warm-up).
+    /// Warm **type** icons only (cheap). Thumbnails are generated on demand for visible cells.
     static func prefetch(urls: [URL], size: CGFloat, limit: Int = 120) {
         let batch = Array(urls.prefix(limit))
         guard !batch.isEmpty else { return }
@@ -330,6 +396,56 @@ enum FileIcon {
 
     static func clearCache() {
         cache.removeAllObjects()
+    }
+
+    private static func isPreviewable(_ url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .contentTypeKey])
+        if values?.isDirectory == true || values?.isPackage == true { return false }
+        if let type = values?.contentType {
+            return type.conforms(to: .image)
+                || type.conforms(to: .pdf)
+                || type.conforms(to: .movie)
+                || type.conforms(to: .video)
+                || type.conforms(to: .mpeg4Movie)
+                || type.conforms(to: .quickTimeMovie)
+                || type.conforms(to: .svg)
+                || type.conforms(to: .rawImage)
+        }
+        switch url.pathExtension.lowercased() {
+        case "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
+             "raw", "dng", "cr2", "nef",
+             "pdf", "svg",
+             "mp4", "mov", "m4v":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func requestThumbnail(
+        url: URL,
+        size: CGFloat,
+        scale: CGFloat,
+        request: Request,
+        deliver: @escaping (Display) -> Void
+    ) {
+        let qlRequest = QLThumbnailGenerator.Request(
+            fileAt: url,
+            size: CGSize(width: size, height: size),
+            scale: scale,
+            representationTypes: [.lowQualityThumbnail, .thumbnail]
+        )
+        request.qlRequest = qlRequest
+        let thumbKey = cacheKey(.thumbnail, url: url, size: size)
+
+        QLThumbnailGenerator.shared.generateRepresentations(for: qlRequest) { representation, type, _ in
+            guard !request.cancelled, let representation else { return }
+            let image = representation.nsImage
+            if type == .thumbnail {
+                cache.setObject(image, forKey: thumbKey, cost: Int(size * size * 16))
+            }
+            deliver(Display(image: image, isContentPreview: true))
+        }
     }
 }
 

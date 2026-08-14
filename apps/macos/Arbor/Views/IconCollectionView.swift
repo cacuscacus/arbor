@@ -545,6 +545,8 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
     private var iconWidthConstraint: NSLayoutConstraint?
     private var iconHeightConstraint: NSLayoutConstraint?
     private var didBuildView = false
+    private var iconMaxPoints: CGFloat = 64
+    private var iconRequest: FileIcon.Request?
 
     private var entry: FileEntry?
     private var loadToken = UUID()
@@ -572,6 +574,8 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
 
         let root = IconItemRootView()
         root.item = self
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.clear.cgColor
         view = root
 
         selectionBackground.wantsLayer = true
@@ -579,7 +583,9 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         selectionBackground.translatesAutoresizingMaskIntoConstraints = false
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.imageAlignment = .alignCenter
         iconView.animates = false
+        iconView.wantsLayer = true
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         label.alignment = .center
@@ -648,6 +654,8 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
 
         let token = UUID()
         loadToken = token
+        iconMaxPoints = metrics.iconPoints
+        iconRequest?.cancel()
 
         iconView.alphaValue = CGFloat(entry.listingOpacity)
         label.alphaValue = CGFloat(entry.listingOpacity)
@@ -656,21 +664,54 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         label.maximumNumberOfLines = metrics.lineLimit
         label.preferredMaxLayoutWidth = metrics.labelWidth
         label.invalidateIntrinsicContentSize()
-        iconWidthConstraint?.constant = metrics.iconPoints
-        iconHeightConstraint?.constant = metrics.iconPoints
 
-        if let cached = FileIcon.cached(for: entry.id, size: metrics.iconPoints) {
-            iconView.image = cached
+        if let cached = FileIcon.cachedDisplay(for: entry.id, size: metrics.iconPoints) {
+            applyDisplayedIcon(cached)
         } else {
-            iconView.image = NSImage(systemSymbolName: entry.symbolName, accessibilityDescription: nil)
-            FileIcon.load(for: entry.id, size: metrics.iconPoints) { [weak self] image in
-                guard let self, self.loadToken == token else { return }
-                self.iconView.image = image
-            }
+            applyDisplayedIcon(
+                FileIcon.Display(
+                    image: NSImage(systemSymbolName: entry.symbolName, accessibilityDescription: nil)
+                        ?? NSImage(),
+                    isContentPreview: false
+                )
+            )
+        }
+
+        iconRequest = FileIcon.load(for: entry.id, size: metrics.iconPoints) { [weak self] display in
+            guard let self, self.loadToken == token else { return }
+            self.applyDisplayedIcon(display)
         }
 
         applySelectionChrome(selected: selected)
         setRenaming(renaming, draft: renameDraft)
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        iconRequest?.cancel()
+        iconRequest = nil
+        loadToken = UUID()
+        iconView.image = nil
+    }
+
+    private func applyDisplayedIcon(_ display: FileIcon.Display) {
+        iconView.image = display.image
+        iconView.layer?.cornerRadius = display.isContentPreview ? 3 : 0
+        iconView.layer?.masksToBounds = display.isContentPreview
+        let fitted = Self.aspectFit(display.image.size, max: iconMaxPoints)
+        iconWidthConstraint?.constant = fitted.width
+        iconHeightConstraint?.constant = fitted.height
+    }
+
+    private static func aspectFit(_ size: NSSize, max maxPoints: CGFloat) -> NSSize {
+        guard size.width > 0, size.height > 0 else {
+            return NSSize(width: maxPoints, height: maxPoints)
+        }
+        let scale = min(maxPoints / size.width, maxPoints / size.height)
+        return NSSize(
+            width: max(1, (size.width * scale).rounded()),
+            height: max(1, (size.height * scale).rounded())
+        )
     }
 
     func setRenaming(_ active: Bool, draft: String) {
@@ -707,11 +748,18 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
 
     override var isSelected: Bool {
         didSet {
+            view.layer?.backgroundColor = NSColor.clear.cgColor
             applySelectionChrome(selected: isSelected)
             if let entry {
                 label.alphaValue = CGFloat(entry.listingOpacity)
                 iconView.alphaValue = CGFloat(entry.listingOpacity)
             }
+        }
+    }
+
+    override var highlightState: NSCollectionViewItem.HighlightState {
+        didSet {
+            view.layer?.backgroundColor = NSColor.clear.cgColor
         }
     }
 
@@ -792,6 +840,12 @@ private final class IconItemRootView: NSView {
     private var downAt: NSPoint?
     private var moved = false
     private var lastClickAt: Date?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
 
     /// Pass events through cell padding so the collection view can marquee / clear.
     override func hitTest(_ point: NSPoint) -> NSView? {
