@@ -23,6 +23,7 @@ struct FileBrowserView: View {
     @State private var errorMessage: String?
     @State private var details: FileDetails?
     @State private var multiInfo: MultiSelectionInfo?
+    @State private var quickDiffRequest: QuickDiffRequest?
     @State private var transferErrorTitle = "Transfer Failed"
     @State private var transferErrorMessage: String?
     @State private var createDialog: CreateItemDialog?
@@ -265,6 +266,9 @@ struct FileBrowserView: View {
             .sheet(item: $multiInfo) { info in
                 MultiSelectionInfoView(info: info)
             }
+            .sheet(item: $quickDiffRequest) { request in
+                QuickDiffView(left: request.left, right: request.right)
+            }
             .background {
                 shortcutButtons
             }
@@ -369,6 +373,12 @@ struct FileBrowserView: View {
 
                 Button("") { _ = moveSelectionToTrash() }
                     .keyboardShortcut(.delete, modifiers: [])
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { presentQuickDiff(for: selectedVisibleEntries()) }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(!canQuickDiff(selectedVisibleEntries()))
                     .opacity(0)
                     .allowsHitTesting(false)
             }
@@ -565,6 +575,14 @@ struct FileBrowserView: View {
             WorkspaceActions.revealInFinder(previewTargets(for: anchor).map(\.id))
         }
 
+        if canQuickDiff(targets) {
+            Button("Quick Diff…") {
+                commitContextSelection(anchor: anchor)
+                presentQuickDiff(for: previewTargets(for: anchor))
+            }
+            .keyboardShortcut("d", modifiers: .command)
+        }
+
         if targets.count == 1, let only = targets.first {
             Button("Rename") {
                 commitContextSelection(anchor: anchor)
@@ -645,6 +663,22 @@ struct FileBrowserView: View {
         if !(selection.contains(anchor.id) && selection.count > 1) {
             selection = [anchor.id]
         }
+    }
+
+    private func selectedVisibleEntries() -> [FileEntry] {
+        visibleEntries.filter { selection.contains($0.id) }
+    }
+
+    private func canQuickDiff(_ targets: [FileEntry]) -> Bool {
+        targets.count == 2 && targets.allSatisfy { !$0.isBrowsable }
+    }
+
+    private func presentQuickDiff(for targets: [FileEntry]) {
+        guard canQuickDiff(targets) else { return }
+        quickDiffRequest = QuickDiffRequest(
+            left: targets[0].id,
+            right: targets[1].id
+        )
     }
 
     // MARK: - Search / navigation

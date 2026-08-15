@@ -184,10 +184,11 @@ Ambient Git + a fast two-file compare — the “I’m in a repo” feeling with
 
 User selects **exactly two files** (or picks “Diff with…” from a second path) → opens a **simple, readable diff viewer** optimized for fast checks, not a full merge tool.
 
-- ⬚ Side-by-side and unified views; word/line highlighting
-- ⬚ Binary / huge-file guards with clear messaging
+- ◐ Side-by-side and unified views with line highlighting (MVP on `feature/phase-4-quick-diff`)
+- ⬚ Word-level highlighting inside changed lines
+- ✓ Binary / huge-file guards with clear messaging
 - ⬚ Optional: diff working tree vs HEAD for one file when inside a Git repo
-- ⬚ Keyboard-first: `⌘D` (or equivalent) when two files are selected
+- ✓ Keyboard-first: `⌘D` when exactly two files are selected; **Quick Diff…** context action
 
 Out of scope for the first cut: three-way merge, editing inside the diff, directory diffs (those can follow).
 

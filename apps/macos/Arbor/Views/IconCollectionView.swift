@@ -263,9 +263,6 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             renameDraft: getRenameDraft(),
             actions: self
         )
-        if let makeItemMenu {
-            item.view.menu = NSHostingMenu(rootView: makeItemMenu(entry))
-        }
         return item
     }
 
@@ -312,6 +309,11 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             return NSHostingMenu(rootView: makeEmptyMenu())
         }
         return NSMenu()
+    }
+
+    func itemMenu(for entry: FileEntry) -> NSMenu? {
+        guard let makeItemMenu else { return nil }
+        return NSHostingMenu(rootView: makeItemMenu(entry))
     }
 
     func open(entry: FileEntry) { onOpen?(entry) }
@@ -420,8 +422,11 @@ final class IconCollectionNSView: NSCollectionView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
-        menu = eventHandler?.emptyMenu()
         registerForDraggedTypes([.fileURL])
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        eventHandler?.emptyMenu()
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -529,6 +534,8 @@ protocol IconItemActionHandling: AnyObject {
     func cancelRename()
     func updateRenameDraft(_ text: String)
     func dropURLs(_ urls: [URL], onto entry: FileEntry, copy: Bool)
+    /// Built per right-click: cell-time menus freeze the selection they were made with.
+    func itemMenu(for entry: FileEntry) -> NSMenu?
 }
 
 /// Programmatic collection item. `@objc` name is required so AppKit’s ObjC
@@ -792,6 +799,11 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         actions?.requestRename(entry: entry)
     }
 
+    func currentContextMenu() -> NSMenu? {
+        guard let entry else { return nil }
+        return actions?.itemMenu(for: entry)
+    }
+
     func beginFileDrag() {
         guard let entry, let actions, let event = NSApp.currentEvent else { return }
         let urls = actions.beginDrag(anchor: entry)
@@ -845,6 +857,10 @@ private final class IconItemRootView: NSView {
 
     override func updateLayer() {
         layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        item?.currentContextMenu()
     }
 
     /// Pass events through cell padding so the collection view can marquee / clear.
