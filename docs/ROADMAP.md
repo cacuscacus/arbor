@@ -184,7 +184,7 @@ Ambient Git + a fast two-file compare — the “I’m in a repo” feeling with
 
 User selects **exactly two files** (or picks “Diff with…” from a second path) → opens a **simple, readable diff viewer** optimized for fast checks, not a full merge tool.
 
-- ◐ Side-by-side and unified views with line highlighting (MVP on `feature/phase-4-quick-diff`)
+- ✓ Side-by-side and unified views with line highlighting ([v1.5.0](https://github.com/cacuscacus/arbor/releases/tag/v1.5.0))
 - ⬚ Word-level highlighting inside changed lines
 - ✓ Binary / huge-file guards with clear messaging
 - ⬚ Optional: diff working tree vs HEAD for one file when inside a Git repo
@@ -271,6 +271,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
 - ✓ [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1) — live folder listing refresh for visible panes
 - ✓ [v1.4.2](https://github.com/cacuscacus/arbor/releases/tag/v1.4.2) — Dock New Window opens on the current virtual desktop
+- ✓ [v1.5.0](https://github.com/cacuscacus/arbor/releases/tag/v1.5.0) — lightweight two-file Quick Diff
 - ✓ [v1.4.9](https://github.com/cacuscacus/arbor/releases/tag/v1.4.9) — explicit Copy File Path context action
 - ✓ [v1.4.8](https://github.com/cacuscacus/arbor/releases/tag/v1.4.8) — icon view Quick Look thumbnails
 - ✓ [v1.4.7](https://github.com/cacuscacus/arbor/releases/tag/v1.4.7) — icon view precise hit targets + marquee
@@ -297,6 +298,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.4.0 agent runners (Phase 2b)
 ✓ v1.4.1 live folder listing refresh
 ✓ v1.4.2 Dock New Window on current Space
+✓ v1.5.0 lightweight two-file Quick Diff
 ✓ v1.4.9 explicit Copy File Path context action
 ✓ v1.4.8 icon view Quick Look thumbnails
 ✓ v1.4.7 icon view precise hit targets + marquee

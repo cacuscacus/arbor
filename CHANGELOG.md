@@ -11,6 +11,19 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-15
+
+### Added
+
+- **Quick Diff** compares exactly two selected text files from the context menu or with `⌘D`
+- Side-by-side and unified layouts with line-level additions, removals, and changes
+- Independent horizontal scrolling per side-by-side pane with synchronized vertical navigation
+- Clear guards for folders, binary files, unsupported encodings, oversized files, and excessive line counts
+
+### Fixed
+
+- Icon-view context menus are built when opened so multi-selection actions always reflect the current selection
+
 ## [1.4.9] — 2026-08-14
 
 ### Changed
@@ -160,7 +173,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.9...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.5.0
 [1.4.9]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.9
 [1.4.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.8
 [1.4.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.7
