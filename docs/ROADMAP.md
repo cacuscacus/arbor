@@ -8,6 +8,8 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 
 **Recommended next milestone:** Phase **4** quick diff / ambient Git, or browser polish (richer session fields, FS watchers, tab reorder), or deeper Phase **2a** terminal sessions.
 
+**Remote SSH (Phase 6):** feasibility analysis captured in [`docs/REMOTE-SSH.md`](REMOTE-SSH.md) — high product fit, high architecture risk; needs `FileProvider` / `ItemRef` before first remote pane. Not the immediate cut; track as the first hard remote provider once local FS is abstracted.
+
 ---
 
 ## Phase 0 — Foundation
@@ -204,9 +206,25 @@ Builds on Phase 2b; Arbor-native intelligence rather than only spawning external
 
 ## Phase 6 — Preview & remote
 
-- ⬚ Quick Look + Markdown / image / video / PDF / code / hex
-- ⬚ SSH / SFTP / SMB / NFS / WebDAV
+- ⬚ Quick Look + Markdown / image / video / PDF / code / hex (local polish continues; remote previews are capability-gated)
+- ⬚ SMB / NFS / WebDAV (additional providers once the abstraction exists)
 - ⬚ S3, Google Drive, Dropbox
+
+### 6 — SSH / SFTP as first-class locations
+
+Analysis (2026-08-15): [`REMOTE-SSH.md`](REMOTE-SSH.md). Intent: sidebar **SSH locations**, credentials (OpenSSH config + agent + Keychain), split local↔remote, DnD translated to SFTP/rsync jobs, remote terminal / agents on the connected host.
+
+| Sub-phase | Goal | Status |
+|-----------|------|--------|
+| **6a** Provider abstraction | `ItemRef` / Location / Volume / Connection; `LocalFileProvider`; migrate listing, mutations, undo, favorites, sessions | ⬚ planned (also advances Phase 0 “FS into core”) |
+| **6b** SSH MVP | Connect UI, host keys, SFTP browse + basic mutations, reconnectable favorites/sessions, poll refresh | ⬚ planned |
+| **6c** Cross-location transfers | Job engine, local↔remote DnD, custom UTType, optional rsync-over-SSH, safe move = copy+verify+delete | ⬚ planned |
+| **6d** Remote terminal & agents | `ExecutionContext.remote`, `ssh -tt`, follow-folder per connection, clear host labels | ⬚ planned |
+| **6e** Search / preview polish | Remote `fd`/`find`, thumbnail materialization limits, capability-aware Get Info / Open | ⬚ planned |
+
+**Transport decision (analysis):** SFTP baseline · rsync as large-tree accelerator · OpenSSH for terminal · **not** sshfs as internal model (optional Finder mount later).
+
+**Hard constraints:** do not fake remotes as local file URLs; capability-aware Trash / Quick Look / Show in Finder / Open in Cursor / watchers; never silent host-key accept.
 
 ---
 
@@ -286,7 +304,9 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.4.4 Sort By + hidden-file dimming
 ✓ v1.4.3 Show Hidden Files (⌘⇧.)
   → next: quick diff / Git (Phase 4), browser polish,
-     richer terminal sessions → remotes / preview → Linux / Windows
+     richer terminal sessions
+  → later: FileProvider + SSH locations (Phase 6 / REMOTE-SSH.md),
+     preview → Linux / Windows
 ```
 
 Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers depth/polish, vertical split, shell profile picker, more agent presets, manual Refresh (⌘R).
