@@ -11,6 +11,12 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.4.9] — 2026-08-14
+
+### Changed
+
+- File and folder context menus now label the full-path clipboard action explicitly as **Copy File Path** (or **Copy File Paths** for multi-selection)
+
 ## [1.4.8] — 2026-08-14
 
 ### Added
@@ -154,7 +160,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.8...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.4.9...HEAD
+[1.4.9]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.9
 [1.4.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.8
 [1.4.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.7
 [1.4.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.6

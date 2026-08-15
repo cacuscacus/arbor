@@ -585,7 +585,7 @@ struct FileBrowserView: View {
 
         Divider()
 
-        Button(targets.count > 1 ? "Copy Paths" : "Copy Path") {
+        Button(targets.count > 1 ? "Copy File Paths" : "Copy File Path") {
             commitContextSelection(anchor: anchor)
             WorkspaceActions.copyPaths(previewTargets(for: anchor).map(\.id))
         }

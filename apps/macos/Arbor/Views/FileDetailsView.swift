@@ -60,7 +60,7 @@ struct FileDetailsView: View {
             Spacer(minLength: 0)
 
             HStack {
-                Button("Copy Path") {
+                Button("Copy File Path") {
                     WorkspaceActions.copyPath(details.url)
                 }
                 Button("Show in Finder") {

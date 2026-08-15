@@ -252,6 +252,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 - ✓ [v1.4.0](https://github.com/cacuscacus/arbor/releases/tag/v1.4.0) — agent runners (Settings → Tools, Run Agent Here…, Open in Cursor)
 - ✓ [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1) — live folder listing refresh for visible panes
 - ✓ [v1.4.2](https://github.com/cacuscacus/arbor/releases/tag/v1.4.2) — Dock New Window opens on the current virtual desktop
+- ✓ [v1.4.9](https://github.com/cacuscacus/arbor/releases/tag/v1.4.9) — explicit Copy File Path context action
 - ✓ [v1.4.8](https://github.com/cacuscacus/arbor/releases/tag/v1.4.8) — icon view Quick Look thumbnails
 - ✓ [v1.4.7](https://github.com/cacuscacus/arbor/releases/tag/v1.4.7) — icon view precise hit targets + marquee
 - ✓ [v1.4.6](https://github.com/cacuscacus/arbor/releases/tag/v1.4.6) — icon view toolbar glass underlap fix
@@ -277,6 +278,7 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
 ✓ v1.4.0 agent runners (Phase 2b)
 ✓ v1.4.1 live folder listing refresh
 ✓ v1.4.2 Dock New Window on current Space
+✓ v1.4.9 explicit Copy File Path context action
 ✓ v1.4.8 icon view Quick Look thumbnails
 ✓ v1.4.7 icon view precise hit targets + marquee
 ✓ v1.4.6 icon view toolbar underlap fix
