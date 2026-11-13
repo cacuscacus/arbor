@@ -707,6 +707,10 @@ private struct LocalFileBrowserView: View {
             }
             let context = ExecutionContext(workingDirectory: navigation.current)
             if context.supportsLocalExecution {
+                Button("Open Terminal Here") {
+                    WorkspaceActions.openTerminal(context: context)
+                }
+                .help("Opens Terminal.app in this folder")
                 Button("Run Agent Here…") {
                     AgentRunCoordinator.shared.presentRunAgent(context: context)
                 }
@@ -820,14 +824,14 @@ private struct LocalFileBrowserView: View {
         Divider()
 
         if localURLs.count == targets.count {
-            Button("New Terminal Here") {
+            Button("Open Terminal Here") {
                 commitContextSelection(anchor: anchor)
                 let resolved = previewTargets(for: anchor)
                 WorkspaceActions.openTerminal(
                     context: WorkspaceActions.executionContext(for: resolved)
                 )
             }
-            .help(targets.count > 1 ? "Opens at the shared folder for this selection" : "")
+            .help(targets.count > 1 ? "Opens at the shared folder for this selection" : "Opens Terminal.app in this folder")
 
             Button("Run Agent Here…") {
                 commitContextSelection(anchor: anchor)

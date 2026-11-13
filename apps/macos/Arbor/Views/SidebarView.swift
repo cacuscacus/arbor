@@ -309,6 +309,12 @@ struct SidebarView: View {
                 }
             }
             if FileProviderRegistry.shared.intrinsicLocalURL(for: item.itemRef) != nil {
+                Button("Open Terminal Here") {
+                    WorkspaceActions.openTerminal(
+                        context: ExecutionContext(workingDirectory: item.itemRef)
+                    )
+                }
+                .help("Opens Terminal.app in this folder")
                 Button("Run Agent Here…") {
                     AgentRunCoordinator.shared.presentRunAgent(
                         context: ExecutionContext(workingDirectory: item.itemRef)

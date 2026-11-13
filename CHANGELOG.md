@@ -11,6 +11,10 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Added
+
+- **Open Terminal Here** in the folder, empty-space, and sidebar context menus, placed above **Run Agent Here…**
+
 ## [1.6.0] — 2026-11-13
 
 ### Added
