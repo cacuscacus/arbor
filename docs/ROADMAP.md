@@ -166,7 +166,7 @@ Largely shipped across [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag
 - ⬚ Vertical split as follow-up
 - ✓ Each pane has its own cwd, selection, and history
 - ✓ Drag-and-drop between panes (copy/move; pane-root drop + cross-pane listing refresh in [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1))
-- ✓ “Open in Split” from selection (browser / Favorites); View → Toggle Split View (⌘\) / Close Split View
+- ✓ “Open in Split” from selection (browser / Favorites); View → Toggle Split View (⌘⌥S) / Close Split View
 
 Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
 
@@ -207,7 +207,12 @@ Builds on Phase 2b; Arbor-native intelligence rather than only spawning external
 
 ## Phase 6 — Preview & remote
 
-- ⬚ Quick Look + Markdown / image / video / PDF / code / hex (local polish continues; remote previews are capability-gated)
+- ✓ Quick Look via Space / ⌘Y for local items (Up/Down walks the listing; remote previews remain capability-gated)
+- ✓ **Rendered Markdown preview** for `.md` files — GFM subset, local/relative images, zoom (⌘+ ⌘− ⌘0), reload
+- ✓ **Mermaid diagrams** in Markdown (bundled runtime, offline) and inline **quick edit** (⌘E / ⌘S)
+- ✓ **Syntax-highlighted code preview** for 35+ languages (bundled highlight.js), with language/line/size header
+- ✓ **Go to Folder…** (⇧⌘G) with `~`, relative names, Tab completion, and file reveal
+- ⬚ Hex/binary previews; Markdown polish (TOC, task-list editing, print, Mermaid theme switch); code folding and “copy” action
 - ⬚ SMB / NFS / WebDAV (additional providers once the abstraction exists)
 - ⬚ S3, Google Drive, Dropbox
 
@@ -217,8 +222,8 @@ Analysis (2026-08-15): [`REMOTE-SSH.md`](REMOTE-SSH.md). Intent: sidebar **SSH l
 
 | Sub-phase | Goal | Status |
 |-----------|------|--------|
-| **6a** Provider abstraction | `ItemRef` / Location / Volume / Connection; `LocalFileProvider`; migrate listing, mutations, undo, favorites, sessions | ⬚ planned (also advances Phase 0 “FS into core”) |
-| **6b** SSH MVP | Connect UI, host keys, SFTP browse + basic mutations, reconnectable favorites/sessions, poll refresh | ⬚ planned |
+| **6a** Provider abstraction | `ItemRef` / Location / Volume / Connection; `LocalFileProvider`; migrate listing, mutations, undo, favorites, sessions | ✓ complete — provider-neutral browser/actions/execution requests, async provider-routed undo, materialization boundary and capability gating |
+| **6b** SSH MVP | Connect UI, host keys, SFTP browse + basic mutations, reconnectable favorites/sessions, poll refresh | ◐ in progress — first usable key/agent-auth slice implemented; interactive/Keychain auth remains |
 | **6c** Cross-location transfers | Job engine, local↔remote DnD, custom UTType, optional rsync-over-SSH, safe move = copy+verify+delete | ⬚ planned |
 | **6d** Remote terminal & agents | `ExecutionContext.remote`, `ssh -tt`, follow-folder per connection, clear host labels | ⬚ planned |
 | **6e** Search / preview polish | Remote `fd`/`find`, thumbnail materialization limits, capability-aware Get Info / Open | ⬚ planned |
@@ -312,4 +317,4 @@ No Apple Developer Program / notarization. See [RELEASES.md](RELEASES.md).
      preview → Linux / Windows
 ```
 
-Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers depth/polish, vertical split, shell profile picker, more agent presets, manual Refresh (⌘R).
+Polish backlog (can ship interleaved as minor releases): richer session fields, tab reorder, Open in New Tab, FS watchers depth/polish, vertical split, shell profile picker, more agent presets, manual Refresh (⌘R), Quick Look polish (space over hovered item, edit-while-previewing).

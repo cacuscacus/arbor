@@ -3,11 +3,11 @@ import CoreGraphics
 
 /// One place in a pane’s Back/Forward history, including the scroll offset when we left it.
 struct FolderHistoryEntry: Equatable {
-    var url: URL
+    var item: ItemRef
     var scrollY: CGFloat
 
-    init(url: URL, scrollY: CGFloat = 0) {
-        self.url = url.standardizedFileURL
+    init(item: ItemRef, scrollY: CGFloat = 0) {
+        self.item = item
         self.scrollY = max(0, scrollY)
     }
 }
@@ -23,7 +23,7 @@ enum FolderScrollRestore: Equatable {
 /// Browser-style back/forward stack for folder navigation (Finder-like scroll restore).
 @Observable
 final class BrowserNavigation {
-    private(set) var current: URL
+    private(set) var current: ItemRef
     private var backStack: [FolderHistoryEntry] = []
     private var forwardStack: [FolderHistoryEntry] = []
 
@@ -36,9 +36,16 @@ final class BrowserNavigation {
     /// Bumped whenever a restore should be attempted.
     private(set) var scrollRestoreToken: UInt = 0
 
-    init(initial: URL = FileManager.default.homeDirectoryForCurrentUser) {
-        current = initial.standardizedFileURL
+    init(initial: ItemRef) {
+        current = initial
     }
+
+    convenience init(initial: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.init(initial: LocalFileLocation.item(for: initial))
+    }
+
+    /// Local compatibility bridge while browser views migrate to ItemRef.
+    var currentLocalURL: URL? { current.localURL }
 
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
@@ -47,11 +54,10 @@ final class BrowserNavigation {
         scrollY = max(0, y)
     }
 
-    /// Records `current` (with live scroll) on the back stack and navigates to `url`.
-    func go(to url: URL) {
-        let target = url.standardizedFileURL
+    /// Records `current` (with live scroll) on the back stack and navigates.
+    func go(to target: ItemRef) {
         guard target != current else { return }
-        backStack.append(FolderHistoryEntry(url: current, scrollY: scrollY))
+        backStack.append(FolderHistoryEntry(item: current, scrollY: scrollY))
         forwardStack.removeAll()
         current = target
         scrollY = 0
@@ -60,27 +66,31 @@ final class BrowserNavigation {
         pendingScrollRestore = nil
     }
 
-    @discardableResult
-    func goBack() -> URL? {
-        guard let previous = backStack.popLast() else { return nil }
-        // Snapshot before any view updates can publish a remounted scroller’s y=0.
-        let leaving = FolderHistoryEntry(url: current, scrollY: scrollY)
-        forwardStack.append(leaving)
-        current = previous.url
-        scrollY = previous.scrollY
-        requestScrollRestore(previous.scrollY < 1 ? .top : .offset(previous.scrollY))
-        return previous.url
+    func go(to url: URL) {
+        go(to: LocalFileLocation.item(for: url))
     }
 
     @discardableResult
-    func goForward() -> URL? {
+    func goBack() -> ItemRef? {
+        guard let previous = backStack.popLast() else { return nil }
+        // Snapshot before any view updates can publish a remounted scroller’s y=0.
+        let leaving = FolderHistoryEntry(item: current, scrollY: scrollY)
+        forwardStack.append(leaving)
+        current = previous.item
+        scrollY = previous.scrollY
+        requestScrollRestore(previous.scrollY < 1 ? .top : .offset(previous.scrollY))
+        return previous.item
+    }
+
+    @discardableResult
+    func goForward() -> ItemRef? {
         guard let next = forwardStack.popLast() else { return nil }
-        let leaving = FolderHistoryEntry(url: current, scrollY: scrollY)
+        let leaving = FolderHistoryEntry(item: current, scrollY: scrollY)
         backStack.append(leaving)
-        current = next.url
+        current = next.item
         scrollY = next.scrollY
         requestScrollRestore(next.scrollY < 1 ? .top : .offset(next.scrollY))
-        return next.url
+        return next.item
     }
 
     func consumePendingScrollRestore() -> FolderScrollRestore? {

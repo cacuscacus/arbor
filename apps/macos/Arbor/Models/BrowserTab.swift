@@ -7,6 +7,8 @@ enum BrowserPaneChromeCommand: Equatable {
     case undo
     case redo
     case toggleSearch
+    case quickLook
+    case goToFolder
 }
 
 /// One folder pane inside a browser tab (primary, or a side of a split).
@@ -23,17 +25,27 @@ final class BrowserPane: Identifiable {
     private(set) var chromeCommandToken = 0
     private(set) var pendingChromeCommand: BrowserPaneChromeCommand?
 
-    init(id: UUID = UUID(), root: URL) {
+    init(id: UUID = UUID(), root: ItemRef) {
         self.id = id
         navigation = BrowserNavigation(initial: root)
     }
 
+    convenience init(id: UUID = UUID(), root: URL) {
+        self.init(id: id, root: LocalFileLocation.item(for: root))
+    }
+
     /// Short folder label for toolbar / tab titles (volume root → friendly name).
     var folderDisplayName: String {
-        let url = navigation.current
-        if url.path == "/" { return "Macintosh HD" }
-        let name = url.lastPathComponent
-        return name.isEmpty ? url.path : name
+        let item = navigation.current
+        if let location = FileProviderRegistry.shared.location(containing: item),
+           item == location.root
+        {
+            return location.displayName
+        }
+        if item.path == "/" {
+            return item.volumeID.rawValue.hasPrefix("local:") ? "Macintosh HD" : "/"
+        }
+        return item.name.isEmpty ? item.path : item.name
     }
 
     func sendChrome(_ command: BrowserPaneChromeCommand) {
@@ -57,15 +69,19 @@ final class BrowserTab: Identifiable {
     private(set) var panes: [BrowserPane]
     var focusedPaneID: BrowserPane.ID
 
-    init(id: UUID = UUID(), root: URL) {
+    init(id: UUID = UUID(), root: ItemRef) {
         self.id = id
         let pane = BrowserPane(root: root)
         panes = [pane]
         focusedPaneID = pane.id
     }
 
+    convenience init(id: UUID = UUID(), root: URL) {
+        self.init(id: id, root: LocalFileLocation.item(for: root))
+    }
+
     /// Restores a tab with one or two panes (horizontal split when `paneRoots.count > 1`).
-    init(id: UUID = UUID(), paneRoots: [URL], focusedPaneIndex: Int = 0) {
+    init(id: UUID = UUID(), paneRoots: [ItemRef], focusedPaneIndex: Int = 0) {
         self.id = id
         let roots = Array(paneRoots.prefix(2))
         precondition(!roots.isEmpty, "BrowserTab requires at least one pane root")
@@ -73,6 +89,14 @@ final class BrowserTab: Identifiable {
         panes = built
         let index = min(max(0, focusedPaneIndex), built.count - 1)
         focusedPaneID = built[index].id
+    }
+
+    convenience init(id: UUID = UUID(), paneRoots: [URL], focusedPaneIndex: Int = 0) {
+        self.init(
+            id: id,
+            paneRoots: paneRoots.map(LocalFileLocation.item(for:)),
+            focusedPaneIndex: focusedPaneIndex
+        )
     }
 
     var isSplit: Bool { panes.count > 1 }
@@ -99,7 +123,7 @@ final class BrowserTab: Identifiable {
     }
 
     /// Opens `folder` in the other pane; enters split mode if needed.
-    func openInSplit(folder: URL) {
+    func openInSplit(folder: ItemRef) {
         if panes.count == 1 {
             let secondary = BrowserPane(root: folder)
             panes.append(secondary)
@@ -110,6 +134,10 @@ final class BrowserTab: Identifiable {
         guard let other = panes.first(where: { $0.id != focusedPaneID }) else { return }
         other.navigation.go(to: folder)
         focusedPaneID = other.id
+    }
+
+    func openInSplit(folder: URL) {
+        openInSplit(folder: LocalFileLocation.item(for: folder))
     }
 
     /// Enter split (clone focused cwd into the new pane) or leave split.

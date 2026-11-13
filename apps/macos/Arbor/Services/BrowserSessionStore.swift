@@ -22,6 +22,11 @@ final class BrowserSessionStore {
         #if DEBUG
         BrowserSessionSnapshot.runSelfCheck()
         BrowserSort.runSelfCheck()
+        SearchService.runSelfCheck()
+        GoToFolderResolver.runSelfCheck()
+        MarkdownHTMLRenderer.runSelfCheck()
+        CodeHTMLRenderer.runSelfCheck()
+        SourceLanguage.runSelfCheck()
         #endif
     }
 
@@ -173,7 +178,8 @@ extension BrowserWindowSnapshot {
     /// Builds live tabs, substituting Home when a saved path is missing.
     @MainActor
     func makeBrowserTabs() -> (tabs: [BrowserTab], selectedTabID: BrowserTab.ID) {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        let home = LocalFileLocation.item(for: homeURL)
         var built: [BrowserTab] = []
 
         for tabSnap in tabs {
@@ -195,19 +201,21 @@ extension BrowserWindowSnapshot {
 }
 
 extension BrowserTabSnapshot {
-    func resolvedPaneRoots(fallback: URL) -> [URL] {
-        let paths = panePaths.isEmpty ? [fallback.path] : panePaths
+    func resolvedPaneRoots(fallback: ItemRef) -> [ItemRef] {
+        let items = paneItems.isEmpty ? [fallback] : paneItems
         // Cap at dual-pane split for this MVP.
-        let limited = Array(paths.prefix(2))
-        return limited.map { Self.resolveDirectoryPath($0, fallback: fallback) }
+        let limited = Array(items.prefix(2))
+        return limited.map { Self.resolveItem($0, fallback: fallback) }
     }
 
-    static func resolveDirectoryPath(_ path: String, fallback: URL) -> URL {
-        let url = URL(fileURLWithPath: path).standardizedFileURL
+    static func resolveItem(_ item: ItemRef, fallback: ItemRef) -> ItemRef {
+        // Non-local locations survive restore while disconnected. Their provider
+        // decides whether reconnect is needed instead of silently falling Home.
+        guard let url = item.localURL else { return item }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            return url
+            return item
         }
-        return fallback.standardizedFileURL
+        return fallback
     }
 }

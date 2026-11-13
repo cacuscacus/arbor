@@ -265,8 +265,7 @@ final class AgentToolsStore {
 
 struct AgentRunRequest: Identifiable, Equatable {
     let id = UUID()
-    var folder: URL
-    var selection: [URL]
+    var context: ExecutionContext
     /// When true, skip sheet and quick-run with default preset.
     var quickRun: Bool = false
 }
@@ -315,7 +314,11 @@ final class AgentRunCoordinator {
     var request: AgentRunRequest?
     var launchError: String?
 
-    func presentRunAgent(folder: URL, selection: [URL] = [], quickRun: Bool = false) {
+    func presentRunAgent(context: ExecutionContext, quickRun: Bool = false) {
+        guard context.supportsLocalExecution else {
+            launchError = "This location does not support local agent execution."
+            return
+        }
         if quickRun {
             guard let preset = AgentToolsStore.shared.defaultPreset else {
                 launchError = "No agent tools are enabled. Open Settings to configure one."
@@ -323,13 +326,12 @@ final class AgentRunCoordinator {
             }
             AgentLauncher.launch(
                 preset: preset,
-                folder: folder,
                 prompt: "",
-                selection: selection
+                context: context
             )
             return
         }
-        request = AgentRunRequest(folder: folder, selection: selection, quickRun: false)
+        request = AgentRunRequest(context: context, quickRun: false)
     }
 
     func dismiss() {
@@ -343,10 +345,16 @@ enum AgentLauncher {
     @MainActor
     static func launch(
         preset: AgentToolPreset,
-        folder: URL,
         prompt: String,
-        selection: [URL]
+        context: ExecutionContext
     ) {
+        guard let folder = context.intrinsicLocalDirectoryURL,
+              let selection = context.intrinsicLocalSelectionURLs
+        else {
+            AgentRunCoordinator.shared.launchError =
+                "This location does not support local agent execution."
+            return
+        }
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let template = trimmedPrompt.isEmpty ? preset.quickRunTemplate : preset.promptTemplate
         var command = AgentCommandExpander.expand(

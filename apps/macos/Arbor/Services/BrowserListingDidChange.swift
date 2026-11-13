@@ -5,19 +5,30 @@ import Foundation
 /// `@State` reload leaves the source pane stale).
 enum BrowserListingDidChange {
     static let name = Notification.Name("ArborBrowserListingDidChange")
+    static let folderItemsKey = "folderItems"
+    /// Legacy key kept for one migration window while call sites finish moving.
     static let folderURLsKey = "folderURLs"
 
-    static func post(folders: [URL]) {
-        let unique = Array(Set(folders.map(\.standardizedFileURL)))
+    static func post(folders: [ItemRef]) {
+        let unique = Array(Set(folders))
         guard !unique.isEmpty else { return }
         NotificationCenter.default.post(
             name: name,
             object: nil,
-            userInfo: [folderURLsKey: unique]
+            userInfo: [folderItemsKey: unique]
         )
     }
 
-    static func folders(from note: Notification) -> [URL] {
-        note.userInfo?[folderURLsKey] as? [URL] ?? []
+    /// Temporary bridge for remaining local URL posters.
+    static func post(folderURLs: [URL]) {
+        post(folders: folderURLs.map(LocalFileLocation.item(for:)))
+    }
+
+    static func folders(from note: Notification) -> [ItemRef] {
+        if let items = note.userInfo?[folderItemsKey] as? [ItemRef] {
+            return items
+        }
+        let urls = note.userInfo?[folderURLsKey] as? [URL] ?? []
+        return urls.map(LocalFileLocation.item(for:))
     }
 }

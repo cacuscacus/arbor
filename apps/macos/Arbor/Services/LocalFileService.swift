@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 struct FileEntry: Identifiable, Hashable {
-    let id: URL
+    let id: ItemRef
     let name: String
     let isDirectory: Bool
     let isPackage: Bool
@@ -13,6 +13,11 @@ struct FileEntry: Identifiable, Hashable {
     let created: Date?
     /// Relative or absolute location label (used in search results).
     let location: String
+
+    /// Temporary bridge for local-only AppKit and workspace APIs.
+    var localURL: URL? {
+        FileProviderRegistry.shared.intrinsicLocalURL(for: id)
+    }
 
     /// Folders you can browse into (not packages like .app).
     var isBrowsable: Bool {
@@ -51,19 +56,21 @@ struct FileEntry: Identifiable, Hashable {
         return Self.dateFormatter.string(from: date)
     }
 
-    func relativePath(to root: URL) -> String {
-        let rootPath = root.standardizedFileURL.path
-        let path = id.standardizedFileURL.path
+    func relativePath(to root: ItemRef) -> String {
+        guard id.volumeID == root.volumeID else { return id.path }
+        let rootPath = root.path
+        let path = id.path
         if path == rootPath { return "." }
         if path.hasPrefix(rootPath + "/") {
             return String(path.dropFirst(rootPath.count + 1))
         }
         return path
     }
+
 }
 
 struct FileDetails: Hashable {
-    let url: URL
+    let item: ItemRef
     let name: String
     let kind: String
     let size: UInt64?
@@ -76,7 +83,10 @@ struct FileDetails: Hashable {
     let isWritable: Bool
     let posixPermissions: Int?
 
-    var path: String { url.path }
+    var path: String { item.path }
+    var localURL: URL? {
+        FileProviderRegistry.shared.intrinsicLocalURL(for: item)
+    }
 
     var formattedSize: String {
         guard let size else { return "—" }
@@ -95,112 +105,100 @@ struct FileDetails: Hashable {
             bit(0o004, "r"), bit(0o002, "w"), bit(0o001, "x"),
         ])
     }
+
 }
 
-/// Temporary Swift-side listing until `arbor-ffi` is linked into the app.
+extension FileEntry {
+    init(providerEntry: FileProviderEntry, location: String = ".") {
+        id = providerEntry.id
+        name = providerEntry.name
+        isDirectory = providerEntry.isDirectory
+        isPackage = providerEntry.isPackage
+        isHidden = providerEntry.isHidden
+        size = providerEntry.size
+        kind = providerEntry.kind
+        modified = providerEntry.modified
+        created = providerEntry.created
+        self.location = location
+    }
+}
+
+extension FileDetails {
+    init(providerDetails: FileProviderItemDetails) {
+        item = providerDetails.item
+        name = providerDetails.name
+        kind = providerDetails.kind
+        size = providerDetails.size
+        created = providerDetails.created
+        modified = providerDetails.modified
+        isDirectory = providerDetails.isDirectory
+        isPackage = providerDetails.isPackage
+        isSymbolicLink = providerDetails.isSymbolicLink
+        isReadable = providerDetails.isReadable
+        isWritable = providerDetails.isWritable
+        posixPermissions = providerDetails.posixPermissions
+    }
+}
+
+/// Compatibility facade while call sites migrate from local URLs to ItemRef.
+/// Filesystem reads now cross the FileProvider boundary.
 enum LocalFileService {
-    private static let listKeys: Set<URLResourceKey> = [
-        .isDirectoryKey,
-        .isPackageKey,
-        .fileSizeKey,
-        .isHiddenKey,
-        .nameKey,
-        .localizedTypeDescriptionKey,
-        .contentModificationDateKey,
-        .creationDateKey,
-    ]
+    private static let provider = LocalFileProvider()
 
     static func list(path: URL, showHiddenFiles: Bool = false) throws -> [FileEntry] {
-        var options: FileManager.DirectoryEnumerationOptions = []
-        if !showHiddenFiles {
-            options.insert(.skipsHiddenFiles)
-        }
-        let contents = try FileManager.default.contentsOfDirectory(
-            at: path,
-            includingPropertiesForKeys: Array(listKeys),
-            options: options
-        )
-
-        var entries: [FileEntry] = contents.compactMap { makeEntry(from: $0, location: ".") }
-
-        entries.sort { lhs, rhs in
-            if lhs.isBrowsable != rhs.isBrowsable {
-                return lhs.isBrowsable && !rhs.isBrowsable
-            }
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-        }
-
-        return entries
+        try provider.listSync(
+            directory: LocalFileLocation.item(for: path),
+            options: FileProviderListingOptions(showHiddenFiles: showHiddenFiles)
+        ).map { FileEntry(providerEntry: $0) }
     }
 
     static func entry(at url: URL, location: String = ".") -> FileEntry? {
-        makeEntry(from: url, location: location)
+        entry(at: LocalFileLocation.item(for: url), location: location)
     }
 
-    static func details(for url: URL) throws -> FileDetails {
-        let keys: Set<URLResourceKey> = [
-            .nameKey,
-            .localizedTypeDescriptionKey,
-            .fileSizeKey,
-            .creationDateKey,
-            .contentModificationDateKey,
-            .isDirectoryKey,
-            .isPackageKey,
-            .isSymbolicLinkKey,
-            .isReadableKey,
-            .isWritableKey,
-        ]
-
-        let values = try url.resourceValues(forKeys: keys)
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let posix = attrs?[.posixPermissions] as? Int
-
-        return FileDetails(
-            url: url,
-            name: values.name ?? url.lastPathComponent,
-            kind: values.localizedTypeDescription ?? "Unknown",
-            size: values.fileSize.map(UInt64.init),
-            created: values.creationDate,
-            modified: values.contentModificationDate,
-            isDirectory: values.isDirectory ?? false,
-            isPackage: values.isPackage ?? false,
-            isSymbolicLink: values.isSymbolicLink ?? false,
-            isReadable: values.isReadable ?? false,
-            isWritable: values.isWritable ?? false,
-            posixPermissions: posix
+    static func entry(at item: ItemRef, location: String = ".") -> FileEntry? {
+        try? FileEntry(
+            providerEntry: provider.entrySync(at: item),
+            location: location
         )
     }
 
-    private static func makeEntry(from url: URL, location: String) -> FileEntry? {
-        let values = try? url.resourceValues(forKeys: listKeys)
-        let isDir = values?.isDirectory ?? false
-        let isPackage = values?.isPackage ?? false
-        let size = UInt64(values?.fileSize ?? 0)
-        let kind: String = {
-            if let description = values?.localizedTypeDescription {
-                return description
-            }
-            if isPackage { return "Application" }
-            if isDir { return "Folder" }
-            return url.pathExtension.isEmpty ? "Document" : url.pathExtension.uppercased()
-        }()
-
-        return FileEntry(
-            id: url,
-            name: values?.name ?? url.lastPathComponent,
-            isDirectory: isDir,
-            isPackage: isPackage,
-            isHidden: (values?.isHidden == true) || url.lastPathComponent.hasPrefix("."),
-            size: size,
-            kind: kind,
-            modified: values?.contentModificationDate,
-            created: values?.creationDate,
-            location: location
+    static func details(for url: URL) throws -> FileDetails {
+        FileDetails(
+            providerDetails: try provider.detailsSync(
+                for: LocalFileLocation.item(for: url)
+            )
         )
     }
 }
 
 enum WorkspaceActions {
+    static func open(_ item: ItemRef) {
+        Task {
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: item)
+                let materialized = try await provider.materialize(item, for: .open)
+                NSWorkspace.shared.open(materialized.url)
+            } catch {
+                NSApp.presentError(error)
+            }
+        }
+    }
+
+    static func openMany(_ items: [ItemRef]) {
+        for item in items {
+            open(item)
+        }
+    }
+
+    static func revealInFinder(_ items: [ItemRef]) {
+        let urls = items.compactMap {
+            FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
+        }
+        guard urls.count == items.count else { return }
+        revealInFinder(urls)
+    }
+
     static func open(_ url: URL) {
         NSWorkspace.shared.open(url)
     }
@@ -230,12 +228,24 @@ enum WorkspaceActions {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    static func copyPaths(_ items: [ItemRef]) {
+        let text = items.map(\.path).joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     static func copyName(_ url: URL) {
         copyNames([url])
     }
 
     static func copyNames(_ urls: [URL]) {
         let text = urls.map(\.lastPathComponent).joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    static func copyNames(_ items: [ItemRef]) {
+        let text = items.map(\.name).joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -249,9 +259,21 @@ enum WorkspaceActions {
         try? process.run()
     }
 
+    static func openTerminal(context: ExecutionContext) {
+        guard let directory = context.intrinsicLocalDirectoryURL else { return }
+        openTerminal(at: directory)
+    }
+
     /// Opens Cursor IDE on a folder (IDE launcher — not Cursor Agent CLI).
     static func openInCursor(at directory: URL) {
         openInApplication(named: "Cursor", path: directory)
+    }
+
+    static func openInCursor(at item: ItemRef) {
+        guard let directory = FileProviderRegistry.shared.intrinsicLocalURL(for: item) else {
+            return
+        }
+        openInCursor(at: directory)
     }
 
     static func openInApplication(named appName: String, path: URL) {
@@ -308,10 +330,13 @@ enum WorkspaceActions {
     }
 
     static func terminalDirectory(for entry: FileEntry) -> URL {
-        if entry.isBrowsable {
-            return entry.id
+        guard let url = entry.localURL else {
+            return FileManager.default.homeDirectoryForCurrentUser
         }
-        return entry.id.deletingLastPathComponent()
+        if entry.isBrowsable {
+            return url
+        }
+        return url.deletingLastPathComponent()
     }
 
     /// Best terminal cwd for a multi-selection (common parent, or single folder).
@@ -324,8 +349,8 @@ enum WorkspaceActions {
         }
 
         let browsable = entries.filter(\.isBrowsable)
-        if browsable.count == 1, let only = browsable.first {
-            return only.id
+        if browsable.count == 1, let only = browsable.first, let url = only.localURL {
+            return url
         }
 
         let parents = Set(entries.map { terminalDirectory(for: $0).standardizedFileURL.path })
@@ -333,7 +358,15 @@ enum WorkspaceActions {
             return URL(fileURLWithPath: path)
         }
 
-        return commonParent(of: entries.map(\.id)) ?? terminalDirectory(for: first)
+        return commonParent(of: entries.compactMap(\.localURL)) ?? terminalDirectory(for: first)
+    }
+
+    static func executionContext(for entries: [FileEntry]) -> ExecutionContext {
+        let directory = terminalDirectory(for: entries)
+        return ExecutionContext(
+            workingDirectory: LocalFileLocation.item(for: directory),
+            selection: entries.map(\.id)
+        )
     }
 
     static func commonParent(of urls: [URL]) -> URL? {

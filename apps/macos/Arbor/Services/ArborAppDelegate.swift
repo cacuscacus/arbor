@@ -5,6 +5,7 @@ final class ArborAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Synchronous: pending snapshots must exist before WindowGroup builds ContentView.
         MainActor.assumeIsolated {
+            _ = SSHLocationStore.shared
             BrowserSessionStore.shared.prepareForLaunch()
         }
     }

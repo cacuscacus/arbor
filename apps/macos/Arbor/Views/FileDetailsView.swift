@@ -61,10 +61,12 @@ struct FileDetailsView: View {
 
             HStack {
                 Button("Copy File Path") {
-                    WorkspaceActions.copyPath(details.url)
+                    WorkspaceActions.copyPaths([details.item])
                 }
-                Button("Show in Finder") {
-                    WorkspaceActions.revealInFinder(details.url)
+                if details.localURL != nil {
+                    Button("Show in Finder") {
+                        WorkspaceActions.revealInFinder([details.item])
+                    }
                 }
                 Spacer()
                 Button("Close") { dismiss() }

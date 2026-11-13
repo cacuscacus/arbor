@@ -26,9 +26,18 @@ enum FileTransferOperation {
         case .copy: return "Copy Failed"
         }
     }
+
+    var providerOperation: FileProviderTransferOperation {
+        switch self {
+        case .move: return .move
+        case .copy: return .copy
+        }
+    }
 }
 
 enum FileOperations {
+    private static let localProvider = LocalFileProvider()
+
     enum TransferError: LocalizedError {
         case destinationNotDirectory
         case cannotMoveIntoSelf
@@ -75,56 +84,30 @@ enum FileOperations {
         copy: Bool
     ) -> TransferResult {
         var result = TransferResult()
-        let fm = FileManager.default
         let destination = destinationDirectory.standardizedFileURL
-
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: destination.path, isDirectory: &isDir), isDir.boolValue else {
-            for source in sources {
-                result.failed.append((source, TransferError.destinationNotDirectory))
-            }
-            return result
-        }
-
+        let destinationRef = LocalFileLocation.item(for: destination)
         let uniqueSources = Array(Set(sources.map { $0.standardizedFileURL }))
 
         for source in uniqueSources {
-            if source == destination {
-                result.failed.append((source, TransferError.cannotMoveIntoSelf))
-                continue
-            }
-            if destination.path.hasPrefix(source.path + "/") {
-                result.failed.append((source, TransferError.cannotMoveIntoSelf))
-                continue
-            }
             // Moving within the same folder is a no-op; copying still duplicates.
             if !copy, source.deletingLastPathComponent() == destination {
                 continue
             }
 
-            let preferredName: String = {
-                if copy, source.deletingLastPathComponent() == destination {
-                    let nsName = source.lastPathComponent as NSString
-                    let base = nsName.deletingPathExtension
-                    let ext = nsName.pathExtension
-                    return ext.isEmpty ? "\(base) copy" : "\(base) copy.\(ext)"
-                }
-                return source.lastPathComponent
-            }()
-
-            let target = uniqueDestination(
-                in: destination,
-                preferredName: preferredName,
-                fileManager: fm
-            )
-
             do {
-                if copy {
-                    try fm.copyItem(at: source, to: target)
-                } else {
-                    try fm.moveItem(at: source, to: target)
+                let receipt = try localProvider.transferSync(
+                    LocalFileLocation.item(for: source),
+                    into: destinationRef,
+                    operation: copy ? .copy : .move
+                )
+                guard let target = receipt.to.localURL else {
+                    throw FileProviderError.unsupportedVolume(receipt.to.volumeID)
                 }
                 result.transferred.append((source, target))
+            } catch FileProviderError.notDirectory {
+                result.failed.append((source, TransferError.destinationNotDirectory))
+            } catch FileProviderError.cannotMoveIntoSelf {
+                result.failed.append((source, TransferError.cannotMoveIntoSelf))
             } catch {
                 result.failed.append((source, error))
             }
@@ -135,19 +118,24 @@ enum FileOperations {
 
     @discardableResult
     static func createFolder(in directory: URL, named name: String = "untitled folder") throws -> URL {
-        let fm = FileManager.default
-        let url = uniqueDestination(in: directory, preferredName: name, fileManager: fm)
-        try fm.createDirectory(at: url, withIntermediateDirectories: false)
+        let entry = try localProvider.createDirectorySync(
+            in: LocalFileLocation.item(for: directory),
+            name: name
+        )
+        guard let url = entry.id.localURL else {
+            throw FileProviderError.unsupportedVolume(entry.id.volumeID)
+        }
         return url
     }
 
     @discardableResult
     static func createEmptyFile(in directory: URL, named name: String = "untitled.txt") throws -> URL {
-        let fm = FileManager.default
-        let url = uniqueDestination(in: directory, preferredName: name, fileManager: fm)
-        let created = fm.createFile(atPath: url.path, contents: Data(), attributes: nil)
-        guard created else {
-            throw CocoaError(.fileWriteUnknown)
+        let entry = try localProvider.createFileSync(
+            in: LocalFileLocation.item(for: directory),
+            name: name
+        )
+        guard let url = entry.id.localURL else {
+            throw FileProviderError.unsupportedVolume(entry.id.volumeID)
         }
         return url
     }
@@ -179,19 +167,21 @@ enum FileOperations {
         guard !trimmed.contains("/") else { throw RenameError.invalidName }
 
         let source = url.standardizedFileURL
-        let destination = source.deletingLastPathComponent().appendingPathComponent(trimmed)
-
-        if destination == source {
-            throw RenameError.unchanged
-        }
-
-        let fm = FileManager.default
-        if fm.fileExists(atPath: destination.path) {
+        do {
+            let receipt = try localProvider.renameSync(
+                LocalFileLocation.item(for: source),
+                to: trimmed
+            )
+            guard receipt.from != receipt.to else {
+                throw RenameError.unchanged
+            }
+            guard let destination = receipt.to.localURL else {
+                throw FileProviderError.unsupportedVolume(receipt.to.volumeID)
+            }
+            return (source, destination)
+        } catch FileProviderError.alreadyExists {
             throw RenameError.nameExists(trimmed)
         }
-
-        try fm.moveItem(at: source, to: destination)
-        return (source, destination)
     }
 
     struct TrashResult {
@@ -203,15 +193,13 @@ enum FileOperations {
     /// Moves items into the Trash. Returns trash URLs when available so Undo can restore them.
     static func trash(_ sources: [URL]) -> TrashResult {
         var result = TrashResult()
-        let fm = FileManager.default
         let unique = Array(Set(sources.map { $0.standardizedFileURL }))
 
         for source in unique {
             do {
-                var resulting: NSURL?
-                try fm.trashItem(at: source, resultingItemURL: &resulting)
-                let trashURL = (resulting as URL?) ?? source
-                result.trashed.append((from: source, trashURL: trashURL.standardizedFileURL))
+                let receipt = try localProvider.trashSync(LocalFileLocation.item(for: source))
+                let trashURL = receipt.trashedItem?.localURL ?? source
+                result.trashed.append((from: source, trashURL: trashURL))
             } catch {
                 result.failed.append((source, error))
             }
@@ -219,48 +207,26 @@ enum FileOperations {
 
         return result
     }
-
-    private static func uniqueDestination(
-        in directory: URL,
-        preferredName: String,
-        fileManager: FileManager
-    ) -> URL {
-        var candidate = directory.appendingPathComponent(preferredName)
-        guard fileManager.fileExists(atPath: candidate.path) else { return candidate }
-
-        let nsName = preferredName as NSString
-        let base = nsName.deletingPathExtension
-        let ext = nsName.pathExtension
-        var index = 1
-        repeat {
-            let suffix = index == 1 ? " copy" : " copy \(index)"
-            let name = ext.isEmpty ? "\(base)\(suffix)" : "\(base)\(suffix).\(ext)"
-            candidate = directory.appendingPathComponent(name)
-            index += 1
-        } while fileManager.fileExists(atPath: candidate.path)
-
-        return candidate
-    }
 }
 
 /// Shared drag payload so multi-selection moves travel with a single dragged row/icon.
 @Observable
 final class FileDragState {
-    var urls: [URL] = []
+    var items: [ItemRef] = []
 
-    func beginDragging(anchor: URL, selection: Set<URL>) -> [URL] {
-        let payload: [URL]
+    func beginDragging(anchor: ItemRef, selection: Set<ItemRef>) -> [ItemRef] {
+        let payload: [ItemRef]
         if selection.contains(anchor), selection.count > 1 {
             payload = Array(selection)
         } else {
             payload = [anchor]
         }
-        urls = payload
+        items = payload
         return payload
     }
 
     func clear() {
-        urls = []
+        items = []
     }
 }
 
@@ -304,36 +270,42 @@ enum FileIcon {
         attributes: .concurrent
     )
 
-    private static func cacheKey(_ kind: Kind, url: URL, size: CGFloat) -> NSString {
+    private static func cacheKey(_ kind: Kind, item: ItemRef, size: CGFloat) -> NSString {
         let clamped = max(8, size.rounded())
-        return "\(url.standardizedFileURL.path)|\(kind.rawValue)|\(Int(clamped * 2))" as NSString
+        return "\(item.volumeID.rawValue)|\(item.path)|\(kind.rawValue)|\(Int(clamped * 2))" as NSString
     }
 
     /// Best available cached image: content thumbnail if present, otherwise type icon.
-    static func cached(for url: URL, size: CGFloat) -> NSImage? {
-        cachedDisplay(for: url, size: size)?.image
+    static func cached(for item: ItemRef, size: CGFloat) -> NSImage? {
+        cachedDisplay(for: item, size: size)?.image
     }
 
-    static func cachedDisplay(for url: URL, size: CGFloat) -> Display? {
+    static func cachedDisplay(for item: ItemRef, size: CGFloat) -> Display? {
         let clamped = max(8, size.rounded())
-        if let thumb = cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) {
+        if let thumb = cache.object(forKey: cacheKey(.thumbnail, item: item, size: clamped)) {
             return Display(image: thumb, isContentPreview: true)
         }
-        if let icon = cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) {
+        if let icon = cache.object(forKey: cacheKey(.typeIcon, item: item, size: clamped)) {
             return Display(image: icon, isContentPreview: false)
         }
         return nil
     }
 
     /// Cached, resized **type** icon (Icon Services). Never mutates the shared `NSWorkspace` image.
-    static func image(for url: URL, size: CGFloat) -> NSImage {
+    static func image(for item: ItemRef, size: CGFloat) -> NSImage {
         let clamped = max(8, size.rounded())
-        let key = cacheKey(.typeIcon, url: url, size: clamped)
+        let key = cacheKey(.typeIcon, item: item, size: clamped)
         if let cached = cache.object(forKey: key) {
             return cached
         }
 
-        let workspaceIcon = NSWorkspace.shared.icon(forFile: url.path)
+        let workspaceIcon: NSImage
+        if let url = FileProviderRegistry.shared.intrinsicLocalURL(for: item) {
+            workspaceIcon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            workspaceIcon = NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
+                ?? NSImage()
+        }
         let icon = (workspaceIcon.copy() as? NSImage) ?? workspaceIcon
         icon.size = NSSize(width: clamped, height: clamped)
         cache.setObject(icon, forKey: key, cost: Int(clamped * clamped * 4))
@@ -344,7 +316,7 @@ enum FileIcon {
     /// `completion` may fire more than once (placeholder, then preview). Always delivered on the main queue.
     @discardableResult
     static func load(
-        for url: URL,
+        for item: ItemRef,
         size: CGFloat,
         completion: @escaping (Display) -> Void
     ) -> Request {
@@ -359,11 +331,11 @@ enum FileIcon {
             }
         }
 
-        if let thumb = cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) {
+        if let thumb = cache.object(forKey: cacheKey(.thumbnail, item: item, size: clamped)) {
             completion(Display(image: thumb, isContentPreview: true))
             return request
         }
-        if let icon = cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) {
+        if let icon = cache.object(forKey: cacheKey(.typeIcon, item: item, size: clamped)) {
             completion(Display(image: icon, isContentPreview: false))
         }
 
@@ -371,25 +343,35 @@ enum FileIcon {
         queue.async {
             guard !request.cancelled else { return }
 
-            if cache.object(forKey: cacheKey(.typeIcon, url: url, size: clamped)) == nil {
-                let icon = image(for: url, size: clamped)
+            if cache.object(forKey: cacheKey(.typeIcon, item: item, size: clamped)) == nil {
+                let icon = image(for: item, size: clamped)
                 deliver(Display(image: icon, isContentPreview: false))
             }
 
+            guard let url = FileProviderRegistry.shared.intrinsicLocalURL(for: item) else {
+                return
+            }
             guard wantsThumbnail, !request.cancelled, isPreviewable(url) else { return }
-            if cache.object(forKey: cacheKey(.thumbnail, url: url, size: clamped)) != nil { return }
-            requestThumbnail(url: url, size: clamped, scale: scale, request: request, deliver: deliver)
+            if cache.object(forKey: cacheKey(.thumbnail, item: item, size: clamped)) != nil { return }
+            requestThumbnail(
+                item: item,
+                url: url,
+                size: clamped,
+                scale: scale,
+                request: request,
+                deliver: deliver
+            )
         }
         return request
     }
 
     /// Warm **type** icons only (cheap). Thumbnails are generated on demand for visible cells.
-    static func prefetch(urls: [URL], size: CGFloat, limit: Int = 120) {
-        let batch = Array(urls.prefix(limit))
+    static func prefetch(items: [ItemRef], size: CGFloat, limit: Int = 120) {
+        let batch = Array(items.prefix(limit))
         guard !batch.isEmpty else { return }
         queue.async {
-            for url in batch {
-                _ = image(for: url, size: size)
+            for item in batch {
+                _ = image(for: item, size: size)
             }
         }
     }
@@ -423,6 +405,7 @@ enum FileIcon {
     }
 
     private static func requestThumbnail(
+        item: ItemRef,
         url: URL,
         size: CGFloat,
         scale: CGFloat,
@@ -436,7 +419,7 @@ enum FileIcon {
             representationTypes: [.lowQualityThumbnail, .thumbnail]
         )
         request.qlRequest = qlRequest
-        let thumbKey = cacheKey(.thumbnail, url: url, size: size)
+        let thumbKey = cacheKey(.thumbnail, item: item, size: size)
 
         QLThumbnailGenerator.shared.generateRepresentations(for: qlRequest) { representation, type, _ in
             guard !request.cancelled, let representation else { return }
@@ -451,10 +434,10 @@ enum FileIcon {
 
 /// Controls the system drag badge: move (no +) by default, copy (+) while Option is held.
 struct FolderDropDelegate: DropDelegate {
-    let destination: URL
+    let destination: ItemRef
     let dragState: FileDragState
     var isTargeted: Binding<Bool>?
-    let onTransfer: ([URL], URL, FileTransferOperation) -> Void
+    let onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
         true
@@ -475,13 +458,36 @@ struct FolderDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         isTargeted?.wrappedValue = false
         let operation = FileTransferOperation.fromModifierFlags
-        let urls = dragState.urls
+        let items = dragState.items
         dragState.clear()
-        let filtered = urls.filter {
-            $0.standardizedFileURL != destination.standardizedFileURL
+        let filtered = items.filter {
+            $0 != destination
         }
-        guard !filtered.isEmpty else { return false }
-        onTransfer(filtered, destination, operation)
+        if !filtered.isEmpty {
+            onTransfer(filtered, destination, operation)
+            return true
+        }
+
+        let providers = info.itemProviders(for: [.fileURL])
+        guard !providers.isEmpty else { return false }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var loaded: [ItemRef] = []
+        for provider in providers {
+            group.enter()
+            provider.loadObject(ofClass: NSURL.self) { object, _ in
+                defer { group.leave() }
+                guard let url = object as? URL else { return }
+                lock.lock()
+                loaded.append(LocalFileLocation.item(for: url))
+                lock.unlock()
+            }
+        }
+        group.notify(queue: .main) {
+            let external = loaded.filter { $0 != destination }
+            guard !external.isEmpty else { return }
+            onTransfer(external, destination, operation)
+        }
         return true
     }
 }

@@ -148,7 +148,7 @@ enum BrowserSort {
         let older = Date(timeIntervalSince1970: 1_000)
         let newer = Date(timeIntervalSince1970: 2_000)
         let folder = FileEntry(
-            id: URL(fileURLWithPath: "/tmp/alpha-dir"),
+            id: LocalFileLocation.item(for: URL(fileURLWithPath: "/tmp/alpha-dir")),
             name: "alpha-dir",
             isDirectory: true,
             isPackage: false,
@@ -160,7 +160,7 @@ enum BrowserSort {
             location: "/tmp"
         )
         let hiddenFile = FileEntry(
-            id: URL(fileURLWithPath: "/tmp/.beta"),
+            id: LocalFileLocation.item(for: URL(fileURLWithPath: "/tmp/.beta")),
             name: ".beta",
             isDirectory: false,
             isPackage: false,
@@ -172,7 +172,7 @@ enum BrowserSort {
             location: "/tmp"
         )
         let file = FileEntry(
-            id: URL(fileURLWithPath: "/tmp/gamma"),
+            id: LocalFileLocation.item(for: URL(fileURLWithPath: "/tmp/gamma")),
             name: "gamma",
             isDirectory: false,
             isPackage: false,

@@ -4,10 +4,11 @@ members = [
     "crates/arbor-core",
     "crates/arbor-ffi",
     "crates/arbor-cli",
+    "crates/arbor-sftp-helper",
 ]
 
 [workspace.package]
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/cacuscacus/arbor"

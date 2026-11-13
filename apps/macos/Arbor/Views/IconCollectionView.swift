@@ -5,18 +5,19 @@ import UniformTypeIdentifiers
 /// Finder-like icon browser backed by AppKit `NSCollectionView` (true virtualization).
 struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentable {
     let entries: [FileEntry]
-    @Binding var selection: Set<URL>
-    @Binding var renamingURL: URL?
+    @Binding var selection: Set<ItemRef>
+    @Binding var renamingItem: ItemRef?
     @Binding var renameDraft: String
     var iconMetrics: IconViewMetrics
-    var currentFolder: URL?
+    var currentFolder: ItemRef?
     var dragState: FileDragState
     var onOpen: (FileEntry) -> Void
-    var onTransfer: ([URL], URL, FileTransferOperation) -> Void
+    var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
     var onDeleteSelection: (() -> Void)? = nil
+    var onQuickLook: (() -> Void)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
 
@@ -65,7 +66,7 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
         coordinator.collectionView = collection
         coordinator.applyMetrics()
         coordinator.reload(entries: entries, preserveSelection: false)
-        FileIcon.prefetch(urls: entries.map(\.id), size: iconMetrics.iconPoints)
+        FileIcon.prefetch(items: entries.map(\.id), size: iconMetrics.iconPoints)
         collection.registerForDraggedTypes([.fileURL])
         return scroll
     }
@@ -82,7 +83,7 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
         coordinator.applyMetrics()
         coordinator.syncEntries(entries)
         coordinator.syncSelection(selection)
-        coordinator.syncRename(renamingURL: renamingURL, draft: renameDraft)
+        coordinator.syncRename(renamingItem: renamingItem, draft: renameDraft)
     }
 }
 
@@ -93,12 +94,12 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     weak var collectionView: IconCollectionNSView?
 
     private var entries: [FileEntry] = []
-    private var indexByURL: [URL: Int] = [:]
+    private var indexByItem: [ItemRef: Int] = [:]
     private var isApplyingSelection = false
     private var lastMetrics: IconViewMetrics?
 
-    private var getSelection: (() -> Set<URL>) = { [] }
-    private var setSelection: ((Set<URL>) -> Void) = { _ in }
+    private var getSelection: (() -> Set<ItemRef>) = { [] }
+    private var setSelection: ((Set<ItemRef>) -> Void) = { _ in }
     private var getRenameDraft: (() -> String) = { "" }
     private var setRenameDraft: ((String) -> Void) = { _ in }
     private var iconMetrics = IconViewMetrics(iconPoints: IconViewMetrics.default)
@@ -107,14 +108,15 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     private var onRequestRename: ((FileEntry) -> Void)?
     private var onCommitRename: (() -> Void)?
     private var onCancelRename: (() -> Void)?
-    private var onTransfer: (([URL], URL, FileTransferOperation) -> Void)?
+    private var onTransfer: (([ItemRef], ItemRef, FileTransferOperation) -> Void)?
     private var onDeleteSelection: (() -> Void)?
-    private var currentFolder: URL?
+    private var onQuickLook: (() -> Void)?
+    private var currentFolder: ItemRef?
     private var makeItemMenu: ((FileEntry) -> AnyView)?
     private var makeEmptyMenu: (() -> AnyView)?
-    private var renamingURL: URL?
+    private var renamingItem: ItemRef?
 
-    private var selection: Set<URL> { getSelection() }
+    private var selection: Set<ItemRef> { getSelection() }
 
     func install<MenuContent: View, EmptyMenu: View>(from parent: IconCollectionView<MenuContent, EmptyMenu>) {
         getSelection = { parent.selection }
@@ -129,8 +131,9 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         onCancelRename = parent.onCancelRename
         onTransfer = parent.onTransfer
         onDeleteSelection = parent.onDeleteSelection
+        onQuickLook = parent.onQuickLook
         currentFolder = parent.currentFolder
-        renamingURL = parent.renamingURL
+        renamingItem = parent.renamingItem
         makeItemMenu = { AnyView(parent.contextMenu($0)) }
         makeEmptyMenu = { AnyView(parent.emptySpaceMenu()) }
     }
@@ -159,7 +162,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             return
         }
         reload(entries: next, preserveSelection: true)
-        FileIcon.prefetch(urls: newIDs, size: iconMetrics.iconPoints)
+        FileIcon.prefetch(items: newIDs, size: iconMetrics.iconPoints)
     }
 
     func reload(entries next: [FileEntry], preserveSelection: Bool) {
@@ -176,27 +179,27 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         }
     }
 
-    func syncSelection(_ selection: Set<URL>) {
+    func syncSelection(_ selection: Set<ItemRef>) {
         applySelectionIndexPaths(selection)
     }
 
-    func syncRename(renamingURL: URL?, draft: String) {
-        self.renamingURL = renamingURL
+    func syncRename(renamingItem: ItemRef?, draft: String) {
+        self.renamingItem = renamingItem
         guard let collectionView else { return }
         for indexPath in collectionView.indexPathsForVisibleItems() {
             guard let item = collectionView.item(at: indexPath) as? IconCollectionItem else { continue }
             let entryID = entries.indices.contains(indexPath.item) ? entries[indexPath.item].id : nil
-            item.setRenaming(entryID != nil && entryID == renamingURL, draft: draft)
+            item.setRenaming(entryID != nil && entryID == renamingItem, draft: draft)
         }
     }
 
     private func rebuildIndex() {
-        var map: [URL: Int] = [:]
+        var map: [ItemRef: Int] = [:]
         map.reserveCapacity(entries.count)
         for (index, entry) in entries.enumerated() {
             map[entry.id] = index
         }
-        indexByURL = map
+        indexByItem = map
     }
 
     private func refreshVisibleItems() {
@@ -210,21 +213,21 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
                 entry: entry,
                 metrics: iconMetrics,
                 selected: selection.contains(entry.id),
-                renaming: renamingURL == entry.id,
+                renaming: renamingItem == entry.id,
                 renameDraft: getRenameDraft(),
                 actions: self
             )
         }
     }
 
-    private func applySelectionIndexPaths(_ selection: Set<URL>) {
+    private func applySelectionIndexPaths(_ selection: Set<ItemRef>) {
         guard let collectionView else { return }
         isApplyingSelection = true
         defer { isApplyingSelection = false }
 
         var paths = Set<IndexPath>()
-        for url in selection {
-            if let index = indexByURL[url] {
+        for item in selection {
+            if let index = indexByItem[item] {
                 paths.insert(IndexPath(item: index, section: 0))
             }
         }
@@ -259,7 +262,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             entry: entry,
             metrics: iconMetrics,
             selected: selection.contains(entry.id),
-            renaming: renamingURL == entry.id,
+            renaming: renamingItem == entry.id,
             renameDraft: getRenameDraft(),
             actions: self
         )
@@ -276,11 +279,11 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
 
     private func publishSelection(from collectionView: NSCollectionView) {
         guard !isApplyingSelection else { return }
-        let urls = Set(collectionView.selectionIndexPaths.compactMap { path -> URL? in
+        let items = Set(collectionView.selectionIndexPaths.compactMap { path -> ItemRef? in
             entries.indices.contains(path.item) ? entries[path.item].id : nil
         })
-        if urls != selection {
-            setSelection(urls)
+        if items != selection {
+            setSelection(items)
         }
         // Collection view already updates `isSelected` on items.
     }
@@ -291,15 +294,15 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     }
 
     func selectMarquee(indexPaths: Set<IndexPath>, additive: Bool) {
-        let urls = Set(indexPaths.compactMap { path -> URL? in
+        let items = Set(indexPaths.compactMap { path -> ItemRef? in
             entries.indices.contains(path.item) ? entries[path.item].id : nil
         })
         if additive {
             var next = selection
-            next.formUnion(urls)
+            next.formUnion(items)
             setSelection(next)
         } else {
-            setSelection(urls)
+            setSelection(items)
         }
         applySelectionIndexPaths(selection)
     }
@@ -322,7 +325,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     func cancelRename() { onCancelRename?() }
     func updateRenameDraft(_ text: String) { setRenameDraft(text) }
 
-    func beginDrag(anchor: FileEntry) -> [URL] {
+    func beginDrag(anchor: FileEntry) -> [ItemRef] {
         guard let dragState else { return [anchor.id] }
         if !selection.contains(anchor.id) {
             setSelection([anchor.id])
@@ -333,9 +336,9 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
 
     func endDrag() { dragState?.clear() }
 
-    func dropURLs(_ urls: [URL], onto entry: FileEntry, copy: Bool) {
+    func dropItems(_ items: [ItemRef], onto entry: FileEntry, copy: Bool) {
         guard entry.isBrowsable else { return }
-        onTransfer?(urls, entry.id, copy ? .copy : .move)
+        onTransfer?(items, entry.id, copy ? .copy : .move)
     }
 
     func openSelection() {
@@ -352,6 +355,10 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
 
     func deleteSelection() {
         onDeleteSelection?()
+    }
+
+    func quickLookSelection() {
+        onQuickLook?()
     }
 
     // MARK: Collection drag-and-drop (drop onto folders)
@@ -388,7 +395,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         guard !urls.isEmpty else { return false }
         let copy = NSEvent.modifierFlags.contains(.option)
             || draggingInfo.draggingSourceOperationMask.contains(.copy)
-        dropURLs(urls, onto: entries[indexPath.item], copy: copy)
+        dropItems(urls.map(LocalFileLocation.item(for:)), onto: entries[indexPath.item], copy: copy)
         return true
     }
 
@@ -411,6 +418,7 @@ protocol IconCollectionEventHandling: AnyObject {
     func emptyMenu() -> NSMenu
     func openSelection()
     func deleteSelection()
+    func quickLookSelection()
 }
 
 final class IconCollectionNSView: NSCollectionView {
@@ -438,6 +446,8 @@ final class IconCollectionNSView: NSCollectionView {
             eventHandler?.openSelection()
         case 51, 117: // Delete / Forward Delete
             eventHandler?.deleteSelection()
+        case 49: // Space -> Quick Look (Finder)
+            eventHandler?.quickLookSelection()
         default:
             super.keyDown(with: event)
         }
@@ -528,12 +538,12 @@ final class IconCollectionNSView: NSCollectionView {
 protocol IconItemActionHandling: AnyObject {
     func open(entry: FileEntry)
     func requestRename(entry: FileEntry)
-    func beginDrag(anchor: FileEntry) -> [URL]
+    func beginDrag(anchor: FileEntry) -> [ItemRef]
     func endDrag()
     func commitRename()
     func cancelRename()
     func updateRenameDraft(_ text: String)
-    func dropURLs(_ urls: [URL], onto entry: FileEntry, copy: Bool)
+    func dropItems(_ items: [ItemRef], onto entry: FileEntry, copy: Bool)
     /// Built per right-click: cell-time menus freeze the selection they were made with.
     func itemMenu(for entry: FileEntry) -> NSMenu?
 }
@@ -806,7 +816,10 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
 
     func beginFileDrag() {
         guard let entry, let actions, let event = NSApp.currentEvent else { return }
-        let urls = actions.beginDrag(anchor: entry)
+        let urls = actions.beginDrag(anchor: entry).compactMap {
+            FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
+        }
+        guard !urls.isEmpty else { return }
         let draggingItems = urls.map { url -> NSDraggingItem in
             let item = NSDraggingItem(pasteboardWriter: url as NSURL)
             item.setDraggingFrame(iconView.frame, contents: iconView.image)

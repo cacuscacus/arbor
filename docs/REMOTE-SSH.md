@@ -1,6 +1,6 @@
 # Remote SSH locations — feasibility analysis
 
-Status: **analysis / planned** (not scheduled for immediate implementation)  
+Status: **implementation in progress** (`feature/ssh-locations`)
 Date: 2026-08-15 · Linked from [ROADMAP.md](ROADMAP.md) Phase 6
 
 ## Executive summary
@@ -59,7 +59,7 @@ Keep identities separate (do **not** encode credentials in paths):
 Connection  →  how to authenticate / reach host (OpenSSH config alias, keys, jump)
 Volume      →  filesystem semantics + capabilities (case, trash, watcher, rename)
 Location    →  sidebar / session root (e.g. /home/alice, /srv/www)
-ItemRef     →  locationID + normalized remote path
+ItemRef     →  volumeID + normalized provider path (stable across named locations)
 ```
 
 Provider surface (conceptually in `arbor-core`, async + cancelable):
@@ -138,6 +138,30 @@ Prefer structured SFTP APIs over shelling out `rm`/`mv` strings (injection + enc
 
 ~4–7 weeks
 
+#### Implementation log
+
+**2026-08-15 — first slice (`feature/ssh-locations`)**
+
+- Added provider-neutral `ItemRef`, `FileLocation`, `FileVolume`, connection/volume/location IDs, provider kind, and capability flags.
+- Added async `FileProvider` listing/metadata boundary, `FileProviderRegistry`, structured errors, and `LocalFileProvider`.
+- Browser directory reload and single-item Get Info now call the provider asynchronously and discard stale/cancelled results.
+- `LocalFileService` remains as a compatibility facade for unmigrated URL call sites; `FileEntry.id` and search-result identity are now canonical `ItemRef`s with an explicit optional local URL bridge.
+- Added provider mutation primitives for create, rename, move/copy, Trash and remove; legacy `FileOperations` now delegates local filesystem work to `LocalFileProvider`.
+- Undo/redo recipes now store provider-neutral `ItemRef` pairs and execute through provider primitives instead of calling `FileManager` directly.
+- Corrected item identity to **volume + provider path** (stable local volume UUID when available); named Locations are navigation roots, so the same file does not gain a new identity when reached through a favorite.
+- Browser navigation/history, pane/tab cloning and queued new-window roots now store `ItemRef`; local-only views use an explicit temporary URL bridge.
+- Session schema v2 persists pane `ItemRef`s and migrates v1 `panePaths`; non-local refs survive restore instead of falling back to Home while disconnected.
+- Favorites persist `ItemRef` and migrate the previous path-only payload.
+- Browser selection, inline rename, list/icon indexing, context targets and in-process drag state now use `ItemRef`; Finder interoperability still publishes and accepts public `fileURL` payloads for local items.
+- Local volume lookup walks to an existing ancestor, and rename/transfer receipts preserve the destination volume ID so path-changing operations do not destabilize selection identity.
+- Browser create/rename/move/copy/Trash call sites now use async `FileProvider` mutations; `BrowserListingDidChange` broadcasts `ItemRef` folders so split panes refresh without URL bridging.
+- Directory listing watchers take `ItemRef` and honor `.nativeWatch`; volumes without it stay idle until remote polling lands in 6b.
+- Added an explicit materialization contract; local providers return intrinsic URLs while unsupported providers render generic icons and never fabricate file URLs.
+- Browser rendering, breadcrumbs, Get Info, WorkspaceActions, focused commands, agent requests and terminal requests now accept provider-neutral refs/context; unavailable providers show a safe disconnected state and remote terminal focus never falls back to Home.
+- Undo/redo is async and provider-routed, exact-destination transfer is part of the provider contract, and non-interruptible mutations always reconcile their receipts. Trash without a restorable receipt no longer creates an invalid undo recipe.
+- Capabilities gate mutations, metadata, native watches and local integrations. Quick Look generation remains local-only through the materialization boundary; remote caching is intentionally 6e.
+- **6a exit reached:** no browser feature requires an `ItemRef` to masquerade as a file URL. SSH transport/UI remains 6b; cross-provider transfer jobs remain 6c; remote execution remains 6d.
+
 ### 6b — SSH MVP
 
 - Connect sheet, Keychain, host-key UX, SFTP pool
@@ -146,6 +170,19 @@ Prefer structured SFTP APIs over shelling out `rm`/`mv` strings (injection + enc
 - **Out of MVP:** QL, edit-upload, fast recursive search, cross-location move, remote Trash
 
 ~5–8 weeks
+
+#### Implementation log
+
+**2026-08-15 — first usable SSH slice (`feature/ssh-locations`)**
+
+- Added a persistent SSH Location catalog with stable connection/volume/location IDs. Catalog data is atomic, mode `0600`, contains no credentials, and registers providers before browser-session restoration.
+- Added the Places `+` flow for OpenSSH config aliases or direct host/user/port endpoints. Concrete aliases are discovered from `~/.ssh/config` and recursive `Include` files without expanding wildcard `Host` declarations.
+- Added a bundled Rust newline-delimited JSON helper using system OpenSSH plus `openssh-sftp-client`. This preserves ssh config, agent, identity files, and ProxyJump while using structured SFTP operations instead of parsing `sftp` output.
+- Host checking is strict. Unknown keys open an explicit fingerprint review flow; accepted keys are appended to `~/.ssh/known_hosts` with mode `0600`. Existing mismatched entries are never replaced automatically.
+- SSH providers now lazily pool one helper per connection and support listing, metadata, create file/folder, rename/move on the same remote volume, permanent delete, reconnect, and five-second visible-pane polling.
+- Remote roots restore safely while offline, retain provider-neutral breadcrumbs and identity, and expose Copy Remote Path. Quick Look, local integrations, remote Trash, remote copy, and cross-provider DnD remain capability-gated.
+- Distribution packaging builds and embeds the helper before deep ad-hoc signing.
+- Current authentication cut is intentionally non-interactive: OpenSSH config, ssh-agent, and default key files. Password/passphrase prompts and optional Keychain-backed credentials remain follow-up 6b work.
 
 ### 6c — Transfer engine + DnD
 

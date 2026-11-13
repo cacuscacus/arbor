@@ -10,15 +10,36 @@ enum TerminalPreferences {
 
 /// Bottom/side terminal chrome: header controls + SwiftTerm PTY host.
 struct TerminalPaneView: View {
-    /// Focused browser pane folder (shell cwd target).
-    let cwd: URL
+    /// Focused browser pane execution target.
+    let context: ExecutionContext
     @Binding var followCwd: Bool
     @Binding var restartToken: UUID
 
     var body: some View {
+        Group {
+            if let cwd = context.intrinsicLocalDirectoryURL {
+                localTerminal(cwd: cwd)
+            } else {
+                ContentUnavailableView(
+                    "Terminal Unavailable",
+                    systemImage: "terminal",
+                    description: Text("This location does not support local execution.")
+                )
+                .overlay(alignment: .topTrailing) {
+                    Button("Close") {
+                        UserDefaults.standard.set(false, forKey: TerminalPreferences.isVisibleKey)
+                    }
+                    .padding(8)
+                }
+            }
+        }
+        .background(.background)
+    }
+
+    private func localTerminal(cwd: URL) -> some View {
         let bridge = EmbeddedTerminalBridge.shared
         return VStack(spacing: 0) {
-            header
+            header(cwd: cwd)
             Divider()
             EmbeddedTerminalRepresentable(
                 cwd: cwd,
@@ -27,15 +48,13 @@ struct TerminalPaneView: View {
                 consumeCommand: { bridge.consume() }
             )
             .id(restartToken)
-            // Inset the PTY glyph grid from the pane edges (text was flush to the border).
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
         }
-        .background(.background)
     }
 
-    private var header: some View {
+    private func header(cwd: URL) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "terminal")
                 .foregroundStyle(.secondary)
@@ -131,10 +150,12 @@ private struct EmbeddedTerminalRepresentable: NSViewRepresentable {
         var followCwd = true
         /// Last directory the shell was told to use (start or `cd`).
         var shellCwd: URL?
+        private var requestedCwd: URL?
         private var didStart = false
         private var lastCommandToken: UUID?
 
         func attach(view: LocalProcessTerminalView, cwd: URL) {
+            requestedCwd = cwd.standardizedFileURL
             // Start after layout so the PTY gets a non-zero size.
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let view else { return }
@@ -149,6 +170,7 @@ private struct EmbeddedTerminalRepresentable: NSViewRepresentable {
         }
 
         func followDirectoryIfNeeded(view: LocalProcessTerminalView, cwd: URL) {
+            requestedCwd = cwd.standardizedFileURL
             guard shellCwd?.standardizedFileURL != cwd.standardizedFileURL else { return }
             guard view.process.running else {
                 startIfNeeded(view: view, cwd: cwd)
@@ -169,7 +191,8 @@ private struct EmbeddedTerminalRepresentable: NSViewRepresentable {
             // Wait briefly for a freshly shown PTY / interactive shell to accept input.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
                 guard let self, let view else { return }
-                self.startIfNeeded(view: view, cwd: self.shellCwd ?? URL(fileURLWithPath: NSHomeDirectory()))
+                guard let cwd = self.shellCwd ?? self.requestedCwd else { return }
+                self.startIfNeeded(view: view, cwd: cwd)
                 guard let data = command.data(using: .utf8) else { return }
                 view.process.send(data: Array(data)[...])
             }

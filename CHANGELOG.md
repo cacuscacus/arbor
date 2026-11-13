@@ -11,6 +11,35 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-11-13
+
+### Added
+
+- **Rendered Markdown preview** for `.md` / `.markdown` — headings, lists, tables, quotes, fenced code, links and images (relative, `../`, remote), with zoom (⌘+ ⌘− ⌘0) and reload (⌘R)
+- **Mermaid diagrams** in Markdown (flowchart, sequence, gantt, class, state, pie, …) via a bundled offline runtime, with a readable error for invalid diagrams
+- **Quick edit** in both previews: ⌘E switches to a monospaced editor, ⌘S saves and re-renders, unsaved changes prompt on close
+- **Syntax-highlighted code preview** for 35+ languages (JS/TS/JSX/TSX, Python, Swift, Rust, Go, Ruby, PHP, Java, Kotlin, C/C++/C#, HTML/XML, CSS/SCSS, JSON, YAML, TOML/INI, GraphQL, shell, SQL, Dockerfile, Makefile, …) with language, line count and size in the header; detection by extension, file name and shebang
+- **Quick Look** (Space / ⌘Y) for local files and folders; Up/Down walk the listing from the panel and the browser selection follows
+- **Go to Folder…** (⇧⌘G) accepting absolute paths, `~`, and names relative to the current folder, with Tab completion and file reveal
+- **Arrow navigation** from the search field into the results (Down/Up, then Return)
+- **SSH remote locations** (MVP): provider-neutral `ItemRef`/location model, SFTP browsing and basic mutations, host-key verification, OpenSSH config discovery, reconnectable favorites and sessions
+
+### Changed
+
+- **Global search uses Spotlight first** (~0.3 s instead of a 5–15 s cold `fd` walk of `$HOME`); `fd` remains the backend for the current folder
+- **Search semantics are Finder-like**: `.gitignore`d files are searchable, bundle internals are not, and a glob-looking name falls back to a literal match (`corchetes[1].txt` finds itself)
+- **View menu** is a single menu again (macOS 26 duplicated it and dropped every custom command); split toggle is **⌘⌥S** so it works on non-US keyboard layouts
+- File menu keeps **Close / Close All** (⌘W) alongside Quick Look
+
+### Fixed
+
+- Search could hang forever: `fd`/`mdfind` output was read after `waitUntilExit`, deadlocking once the 64 KB stdout pipe filled; output is now drained while the process runs
+- Cancelling a search left the child process running; it is now terminated
+- Filenames containing newlines were split and never found (NUL-delimited output now)
+- Double-click in list view did not open folders (SwiftUI `Table` is outline-backed on macOS 26 and the installer rejected it)
+- Return in the Go to Folder sheet was not delivered in optimized builds; the sheet now uses an AppKit key monitor
+- The keyboard stopped reaching the listing after closing the Go to Folder sheet
+
 ## [1.5.0] — 2026-08-15
 
 ### Added
@@ -174,6 +203,7 @@ Tahoe.
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
 [Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.5.0...HEAD
+[1.6.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.0
 [1.5.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.5.0
 [1.4.9]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.9
 [1.4.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.8

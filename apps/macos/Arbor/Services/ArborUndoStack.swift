@@ -1,18 +1,17 @@
 import Foundation
-import AppKit
 
 /// One reversible filesystem change recorded by Arbor.
 enum ArborUndoCommand: Equatable {
     /// Items were moved from `from` → `to`. Undo moves them back.
-    case move([(from: URL, to: URL)])
+    case move([(from: ItemRef, to: ItemRef)])
     /// Items were copied from `from` → `to`. Undo trashes the copies at `to`.
-    case copy([(from: URL, to: URL)])
+    case copy([(from: ItemRef, to: ItemRef)])
     /// A new item was created. Undo trashes it; redo recreates an empty item.
-    case create(url: URL, isDirectory: Bool)
+    case create(item: ItemRef, isDirectory: Bool)
     /// Item was renamed from → to. Undo/redo renames back and forth.
-    case rename(from: URL, to: URL)
-    /// Items were moved to Trash (`from` → `trashURL`). Undo restores from Trash when still present.
-    case trash([(from: URL, trashURL: URL)])
+    case rename(from: ItemRef, to: ItemRef)
+    /// Items were moved to Trash (`from` → `trashItem`). Undo restores when still present.
+    case trash([(from: ItemRef, trashItem: ItemRef)])
 
     var actionName: String {
         switch self {
@@ -38,7 +37,7 @@ enum ArborUndoCommand: Equatable {
             return aFrom == bFrom && aTo == bTo
         case (.trash(let a), .trash(let b)):
             guard a.count == b.count else { return false }
-            return zip(a, b).allSatisfy { $0.from == $1.from && $0.trashURL == $1.trashURL }
+            return zip(a, b).allSatisfy { $0.from == $1.from && $0.trashItem == $1.trashItem }
         default:
             return false
         }
@@ -46,21 +45,22 @@ enum ArborUndoCommand: Equatable {
 }
 
 struct ArborUndoApplyResult {
-    var restoredSelection: Set<URL> = []
+    var restoredSelection: Set<ItemRef> = []
     var errorMessage: String?
-    /// When redo/apply of `.trash` produces new trash URLs, the updated command to push undo.
+    /// When redo/apply of `.trash` produces new Trash refs, the updated command to push undo.
     var rewrittenCommand: ArborUndoCommand?
     /// Parent folders whose listings may be stale after this apply/invert.
-    var affectedFolders: [URL] = []
+    var affectedFolders: [ItemRef] = []
 }
 
 @Observable
 final class ArborUndoStack {
     private(set) var undoCommands: [ArborUndoCommand] = []
     private(set) var redoCommands: [ArborUndoCommand] = []
+    private(set) var isApplying = false
 
-    var canUndo: Bool { !undoCommands.isEmpty }
-    var canRedo: Bool { !redoCommands.isEmpty }
+    var canUndo: Bool { !isApplying && !undoCommands.isEmpty }
+    var canRedo: Bool { !isApplying && !redoCommands.isEmpty }
 
     var undoActionName: String {
         undoCommands.last.map { "Undo \($0.actionName)" } ?? "Undo"
@@ -84,11 +84,13 @@ final class ArborUndoStack {
     }
 
     @discardableResult
-    func undo() -> ArborUndoApplyResult {
+    func undo() async -> ArborUndoApplyResult {
         guard let command = undoCommands.popLast() else {
             return ArborUndoApplyResult()
         }
-        let result = invert(command)
+        isApplying = true
+        defer { isApplying = false }
+        let result = await invert(command)
         if result.errorMessage == nil || !result.restoredSelection.isEmpty {
             // Partial restores still consume the undo entry so we don't double-apply.
             redoCommands.append(command)
@@ -99,31 +101,33 @@ final class ArborUndoStack {
     }
 
     @discardableResult
-    func redo() -> ArborUndoApplyResult {
+    func redo() async -> ArborUndoApplyResult {
         guard let command = redoCommands.popLast() else {
             return ArborUndoApplyResult()
         }
-        let result = apply(command)
+        isApplying = true
+        defer { isApplying = false }
+        let result = await apply(command)
         if result.errorMessage == nil
             || result.rewrittenCommand != nil
             || !result.restoredSelection.isEmpty
         {
             if let rewritten = result.rewrittenCommand {
                 undoCommands.append(rewritten)
-            } else if case .create = command, let newURL = result.restoredSelection.first {
+            } else if case .create = command, let newItem = result.restoredSelection.first {
                 let isDirectory: Bool
                 if case .create(_, let dir) = command {
                     isDirectory = dir
                 } else {
                     isDirectory = false
                 }
-                undoCommands.append(.create(url: newURL, isDirectory: isDirectory))
+                undoCommands.append(.create(item: newItem, isDirectory: isDirectory))
             } else if case .rename(let from, let to) = command,
-                      let newURL = result.restoredSelection.first,
-                      newURL != to
+                      let newItem = result.restoredSelection.first,
+                      newItem != to
             {
                 // Destination was adjusted (name conflict); keep undo accurate.
-                undoCommands.append(.rename(from: from, to: newURL))
+                undoCommands.append(.rename(from: from, to: newItem))
             } else {
                 undoCommands.append(command)
             }
@@ -135,52 +139,50 @@ final class ArborUndoStack {
 
     // MARK: - Apply / invert
 
-    private func apply(_ command: ArborUndoCommand) -> ArborUndoApplyResult {
+    private func apply(_ command: ArborUndoCommand) async -> ArborUndoApplyResult {
         switch command {
         case .move(let pairs):
-            return transferPairs(pairs, operation: .move)
+            return await transferPairs(pairs, operation: .move)
         case .copy(let pairs):
-            return transferPairs(pairs, operation: .copy)
-        case .create(let url, let isDirectory):
-            return recreate(at: url, isDirectory: isDirectory)
+            return await transferPairs(pairs, operation: .copy)
+        case .create(let item, let isDirectory):
+            return await recreate(at: item, isDirectory: isDirectory)
         case .rename(let from, let to):
-            return transferPairs([(from: from, to: to)], operation: .move)
+            return await transferPairs([(from: from, to: to)], operation: .move)
         case .trash(let pairs):
             // After undo, items are back at `from`. Trash them again and remember new trash URLs.
-            let result = FileOperations.trash(pairs.map(\.from))
+            let result = await trashItemsWithReceipts(pairs.map(\.from))
             var applyResult = ArborUndoApplyResult(
-                restoredSelection: Set(result.trashed.map(\.from)),
-                affectedFolders: pairs.map { $0.from.deletingLastPathComponent() }
+                affectedFolders: pairs.compactMap { $0.from.parent }
             )
             if !result.failed.isEmpty {
-                let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
+                let names = result.failed.map { $0.0.name }.joined(separator: ", ")
                 applyResult.errorMessage = result.trashed.isEmpty
                     ? "Could not move to Trash: \(names)"
                     : "Some items could not be moved to Trash: \(names)"
             }
             if !result.trashed.isEmpty {
                 applyResult.rewrittenCommand = .trash(result.trashed)
-                applyResult.restoredSelection = []
             }
             return applyResult
         }
     }
 
-    private func invert(_ command: ArborUndoCommand) -> ArborUndoApplyResult {
+    private func invert(_ command: ArborUndoCommand) async -> ArborUndoApplyResult {
         switch command {
         case .move(let pairs):
             let reversed = pairs.map { (from: $0.to, to: $0.from) }
-            return transferPairs(reversed, operation: .move)
+            return await transferPairs(reversed, operation: .move)
         case .copy(let pairs):
-            return trashURLs(pairs.map(\.to))
-        case .create(let url, _):
-            return trashURLs([url])
+            return await trashItems(pairs.map(\.to))
+        case .create(let item, _):
+            return await trashItems([item])
         case .rename(let from, let to):
-            return transferPairs([(from: to, to: from)], operation: .move)
+            return await transferPairs([(from: to, to: from)], operation: .move)
         case .trash(let pairs):
             // Restore from Trash → original locations (if still in Trash).
-            let reversed = pairs.map { (from: $0.trashURL, to: $0.from) }
-            var result = transferPairs(reversed, operation: .move)
+            let reversed = pairs.map { (from: $0.trashItem, to: $0.from) }
+            var result = await transferPairs(reversed, operation: .move)
             if result.restoredSelection.isEmpty, result.errorMessage == nil {
                 result.errorMessage = "Items are no longer in the Trash."
             } else if result.restoredSelection.count < pairs.count {
@@ -196,34 +198,27 @@ final class ArborUndoStack {
         }
     }
 
-    private func recreate(at url: URL, isDirectory: Bool) -> ArborUndoApplyResult {
-        let fm = FileManager.default
-        let parent = url.deletingLastPathComponent()
+    private func recreate(at item: ItemRef, isDirectory: Bool) async -> ArborUndoApplyResult {
+        guard let parent = item.parent else {
+            return ArborUndoApplyResult(errorMessage: "Cannot recreate the location root.")
+        }
         do {
-            var isDir: ObjCBool = false
-            if !fm.fileExists(atPath: parent.path, isDirectory: &isDir) || !isDir.boolValue {
-                try fm.createDirectory(at: parent, withIntermediateDirectories: true)
-            }
-
-            let target: URL
-            if fm.fileExists(atPath: url.path) {
-                target = uniqueURL(
-                    in: parent,
-                    preferredName: url.lastPathComponent,
-                    fileManager: fm
+            let provider = try FileProviderRegistry.shared.provider(for: parent)
+            let entry: FileProviderEntry
+            if isDirectory {
+                entry = try await provider.createDirectory(
+                    at: item,
+                    createParentDirectories: true
                 )
             } else {
-                target = url
-            }
-
-            if isDirectory {
-                try fm.createDirectory(at: target, withIntermediateDirectories: false)
-            } else {
-                let ok = fm.createFile(atPath: target.path, contents: Data(), attributes: nil)
-                if !ok { throw CocoaError(.fileWriteUnknown) }
+                entry = try await provider.createFile(
+                    at: item,
+                    contents: Data(),
+                    createParentDirectories: true
+                )
             }
             return ArborUndoApplyResult(
-                restoredSelection: [target],
+                restoredSelection: [entry.id],
                 affectedFolders: [parent]
             )
         } catch {
@@ -232,54 +227,33 @@ final class ArborUndoStack {
     }
 
     private func transferPairs(
-        _ pairs: [(from: URL, to: URL)],
-        operation: FileTransferOperation
-    ) -> ArborUndoApplyResult {
-        var restored: Set<URL> = []
+        _ pairs: [(from: ItemRef, to: ItemRef)],
+        operation: FileProviderTransferOperation
+    ) async -> ArborUndoApplyResult {
+        var restored: Set<ItemRef> = []
         var failures: [String] = []
-        var affected: [URL] = []
-        let fm = FileManager.default
+        var affected: [ItemRef] = []
 
         for pair in pairs {
-            let source = pair.from.standardizedFileURL
-            let destination = pair.to.standardizedFileURL
-            let destinationParent = destination.deletingLastPathComponent()
-            affected.append(source.deletingLastPathComponent())
-            affected.append(destinationParent)
+            let source = pair.from
+            let destination = pair.to
+            if let parent = source.parent { affected.append(parent) }
+            if let parent = destination.parent { affected.append(parent) }
 
             do {
-                guard fm.fileExists(atPath: source.path) else {
-                    failures.append("\(source.lastPathComponent): no longer exists")
-                    continue
-                }
-
-                var isDir: ObjCBool = false
-                if !fm.fileExists(atPath: destinationParent.path, isDirectory: &isDir) || !isDir.boolValue {
-                    try fm.createDirectory(at: destinationParent, withIntermediateDirectories: true)
-                }
-
-                // If something already occupies the destination, pick a unique name
-                // in that folder (keeps undo usable even if the tree changed).
-                let finalDestination: URL
-                if fm.fileExists(atPath: destination.path) {
-                    finalDestination = uniqueURL(
-                        in: destinationParent,
-                        preferredName: destination.lastPathComponent,
-                        fileManager: fm
-                    )
-                } else {
-                    finalDestination = destination
-                }
-
-                switch operation {
-                case .move:
-                    try fm.moveItem(at: source, to: finalDestination)
-                case .copy:
-                    try fm.copyItem(at: source, to: finalDestination)
-                }
-                restored.insert(finalDestination)
+                let provider = try FileProviderRegistry.shared.provider(for: source)
+                let receipt = try await provider.transfer(
+                    source,
+                    to: destination,
+                    operation: operation,
+                    createParentDirectories: true,
+                    useUniqueDestination: false
+                )
+                restored.insert(receipt.to)
+            } catch FileProviderError.itemNotFound {
+                failures.append("\(source.name): no longer exists")
             } catch {
-                failures.append("\(source.lastPathComponent): \(error.localizedDescription)")
+                failures.append("\(source.name): \(error.localizedDescription)")
             }
         }
 
@@ -293,22 +267,24 @@ final class ArborUndoStack {
         return result
     }
 
-    private func trashURLs(_ urls: [URL]) -> ArborUndoApplyResult {
+    private func trashItems(_ items: [ItemRef]) async -> ArborUndoApplyResult {
         var failures: [String] = []
-        var affected: [URL] = []
-        let fm = FileManager.default
+        var affected: [ItemRef] = []
 
-        for url in urls {
-            affected.append(url.deletingLastPathComponent())
+        for item in items {
+            if let parent = item.parent { affected.append(parent) }
             do {
-                var resulting: NSURL?
-                try fm.trashItem(at: url, resultingItemURL: &resulting)
+                let provider = try FileProviderRegistry.shared.provider(for: item)
+                _ = try await provider.trash(item)
             } catch {
-                // Fallback to delete if trash isn't available for this volume.
                 do {
-                    try fm.removeItem(at: url)
+                    let provider = try FileProviderRegistry.shared.provider(for: item)
+                    guard provider.volume.capabilities.contains(.remove) else {
+                        throw error
+                    }
+                    try await provider.remove(item)
                 } catch {
-                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    failures.append("\(item.name): \(error.localizedDescription)")
                 }
             }
         }
@@ -320,24 +296,34 @@ final class ArborUndoStack {
         return result
     }
 
-    private func uniqueURL(
-        in directory: URL,
-        preferredName: String,
-        fileManager: FileManager
-    ) -> URL {
-        var candidate = directory.appendingPathComponent(preferredName)
-        guard fileManager.fileExists(atPath: candidate.path) else { return candidate }
+    private func trashItemsWithReceipts(
+        _ items: [ItemRef]
+    ) async -> (
+        trashed: [(from: ItemRef, trashItem: ItemRef)],
+        failed: [(ItemRef, Error)]
+    ) {
+        var trashed: [(from: ItemRef, trashItem: ItemRef)] = []
+        var failed: [(ItemRef, Error)] = []
 
-        let nsName = preferredName as NSString
-        let base = nsName.deletingPathExtension
-        let ext = nsName.pathExtension
-        var index = 1
-        repeat {
-            let suffix = index == 1 ? " copy" : " copy \(index)"
-            let name = ext.isEmpty ? "\(base)\(suffix)" : "\(base)\(suffix).\(ext)"
-            candidate = directory.appendingPathComponent(name)
-            index += 1
-        } while fileManager.fileExists(atPath: candidate.path)
-        return candidate
+        for item in items {
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: item)
+                let receipt = try await provider.trash(item)
+                if let trashItem = receipt.trashedItem {
+                    trashed.append((from: item, trashItem: trashItem))
+                } else {
+                    failed.append((
+                        item,
+                        FileProviderError.operationFailed(
+                            item: item,
+                            message: "The Trash did not return a restorable item."
+                        )
+                    ))
+                }
+            } catch {
+                failed.append((item, error))
+            }
+        }
+        return (trashed, failed)
     }
 }

@@ -5,32 +5,82 @@ struct FileBrowserView: View {
     @Bindable var pane: BrowserPane
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
+    var isActive: Bool = true
+    var isVisible: Bool = true
+    var onOpenInSplit: ((ItemRef) -> Void)? = nil
+
+    var body: some View {
+        Group {
+            if (try? FileProviderRegistry.shared.provider(for: pane.navigation.current)) != nil {
+                LocalFileBrowserView(
+                    pane: pane,
+                    favorites: favorites,
+                    dragState: dragState,
+                    isActive: isActive,
+                    isVisible: isVisible,
+                    onOpenInSplit: onOpenInSplit,
+                    localPath: FileProviderRegistry.shared.intrinsicLocalURL(
+                        for: pane.navigation.current
+                    )
+                )
+            } else {
+                ContentUnavailableView {
+                    Label("Location Unavailable", systemImage: "externaldrive.badge.questionmark")
+                } description: {
+                    Text("This location is preserved, but its file provider is not connected.")
+                } actions: {
+                    Button("Copy Path") {
+                        WorkspaceActions.copyPaths([pane.navigation.current])
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .focusedSceneValue(\.browserFolderItem, isActive ? pane.navigation.current : nil)
+    }
+}
+
+private struct LocalFileBrowserView: View {
+    @Bindable var pane: BrowserPane
+    @Bindable var favorites: SidebarFavoritesStore
+    var dragState: FileDragState
     /// When multiple tab / split browsers stay mounted, only the focused pane publishes scene focus values.
     var isActive: Bool = true
     /// Tab is selected (both split panes can be visible). Drives live directory watching.
     var isVisible: Bool = true
     /// Opens a folder in the other split pane (creates a split if needed).
-    var onOpenInSplit: ((URL) -> Void)? = nil
+    var onOpenInSplit: ((ItemRef) -> Void)? = nil
+    let localPath: URL?
 
     private var navigation: BrowserNavigation { pane.navigation }
     private var displaySettings: BrowserDisplaySettings { pane.displaySettings }
     private var undoStack: ArborUndoStack { pane.undoStack }
+    private var capabilities: FileProviderCapabilities {
+        FileProviderRegistry.shared.capabilities(for: navigation.current)
+    }
 
     @State private var entries: [FileEntry] = []
     /// Sorted listing / search results — recomputed only when inputs change.
     @State private var visibleEntries: [FileEntry] = []
-    @State private var selection = Set<URL>()
+    @State private var selection = Set<ItemRef>()
     @State private var errorMessage: String?
+    @State private var connectionRequired: ConnectionID?
+    @State private var hostKeyRequired: ConnectionID?
+    @State private var authenticationRequired: ConnectionID?
+    @State private var hostKeyCandidate: SSHHostKeyCandidate?
+    @State private var isLoading = false
     @State private var details: FileDetails?
+    @State private var detailsTask: Task<Void, Never>?
     @State private var multiInfo: MultiSelectionInfo?
     @State private var quickDiffRequest: QuickDiffRequest?
     @State private var transferErrorTitle = "Transfer Failed"
     @State private var transferErrorMessage: String?
+    @State private var permanentDeleteTargets: [FileEntry] = []
     @State private var createDialog: CreateItemDialog?
     @State private var newItemName = ""
     @State private var createErrorMessage: String?
     @State private var undoErrorMessage: String?
-    @State private var renamingURL: URL?
+    @State private var renamingItem: ItemRef?
     @State private var renameDraft = ""
     @State private var renameErrorMessage: String?
     @State private var selectionMarkedAt = Date.distantPast
@@ -41,14 +91,17 @@ struct FileBrowserView: View {
     @State private var isSearching = false
     @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var listingTask: Task<Void, Never>?
+    @State private var mutationTask: Task<Void, Never>?
     @State private var isSearchPresented = false
+    @State private var showsGoToFolder = false
+    /// Item to select once a navigation finishes (Go to Folder on a file).
+    @State private var pendingSelection: ItemRef?
 
     @FocusState private var listFocused: Bool
     @FocusState private var searchFocused: Bool
     @AppStorage(HiddenFilesPreference.key) private var showHiddenFiles = false
     @Environment(WindowBrowserSortStore.self) private var windowSort
-
-    private var path: URL { navigation.current }
 
     private var isSearchActive: Bool {
         !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -58,12 +111,14 @@ struct FileBrowserView: View {
         isSearchPresented || isSearchActive
     }
 
-    private var relativeRoot: URL {
+    private var relativeRoot: ItemRef {
         switch searchScope {
         case .currentFolder:
-            return path
+            return navigation.current
         case .global:
-            return FileManager.default.homeDirectoryForCurrentUser
+            return LocalFileLocation.item(
+                for: FileManager.default.homeDirectoryForCurrentUser
+            )
         }
     }
 
@@ -101,7 +156,9 @@ struct FileBrowserView: View {
                 createErrorMessage: $createErrorMessage,
                 undoErrorMessage: $undoErrorMessage,
                 renameErrorMessage: $renameErrorMessage,
-                onConfirmCreate: confirmCreateItem
+                permanentDeleteTargets: $permanentDeleteTargets,
+                onConfirmCreate: confirmCreateItem,
+                onConfirmPermanentDelete: permanentlyDeletePendingItems
             ))
     }
 
@@ -118,12 +175,16 @@ struct FileBrowserView: View {
             // folder changes (Finder-like), without forcing raw NSScrollView y=0.
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .id(isSearchActive ? "search:\(searchScope)" : path.path)
+                .id(
+                    isSearchActive
+                        ? "search:\(searchScope)"
+                        : "\(navigation.current.volumeID.rawValue):\(navigation.current.path)"
+                )
 
             if !isSearchActive {
                 Divider()
                 BreadcrumbBar(
-                    path: path,
+                    directory: navigation.current,
                     dragState: dragState,
                     onNavigate: { target in navigate(to: target) },
                     onTransfer: handleTransfer
@@ -139,6 +200,14 @@ struct FileBrowserView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
+        .background {
+            // Down/Up from the search field moves into the results (Finder-style).
+            SearchResultKeyMonitor(
+                isActive: isSearchActive && searchFocused && !isSearching && !visibleEntries.isEmpty,
+                onMoveDown: { focusSearchResult(last: false) },
+                onMoveUp: { focusSearchResult(last: true) }
+            )
+        }
         // Same system soft underlap the toolbar uses in non-split (Case 1). Applied on
         // the browser root + enabled on underlying NSScrollViews so trailing HSplit
         // columns get the effect too (AppKit often skips it without a vertical scroller).
@@ -160,7 +229,7 @@ struct FileBrowserView: View {
         .modifier(FileBrowserFocusedSceneModifier(
             isActive: isActive,
             displaySettings: displaySettings,
-            folderURL: navigation.current
+            folderItem: navigation.current
         ))
     }
 
@@ -180,16 +249,24 @@ struct FileBrowserView: View {
                 guard isActive, let command = pane.consumeChromeCommand() else { return }
                 handleChromeCommand(command)
             }
-            .onChange(of: navigation.current, initial: true) { _, url in
+            .onChange(of: navigation.current, initial: true) { _, item in
                 guard isActive else { return }
-                WindowLaunchCoordinator.noteFocusedFolder(url)
+                WindowLaunchCoordinator.noteFocusedItem(item)
             }
             .onChange(of: isActive) { _, active in
                 if active {
-                    WindowLaunchCoordinator.noteFocusedFolder(navigation.current)
+                    WindowLaunchCoordinator.noteFocusedItem(navigation.current)
                     if !isSearchPresented {
                         listFocused = true
                     }
+                }
+            }
+            .onChange(of: showsGoToFolder) { _, presented in
+                // Dismissing the sheet leaves AppKit without a first responder in
+                // this pane, so Return/Space/Delete stop reaching the listing.
+                guard !presented else { return }
+                DispatchQueue.main.async {
+                    if !isSearchPresented { listFocused = true }
                 }
             }
             .onAppear {
@@ -198,9 +275,15 @@ struct FileBrowserView: View {
                     listFocused = true
                 }
             }
+            .onDisappear {
+                listingTask?.cancel()
+                detailsTask?.cancel()
+                QuickLookController.shared.close()
+                DocumentPreviewController.shared.close()
+            }
             .background {
                 FolderListingWatchActivator(
-                    path: (isVisible && !isSearchActive) ? path : nil
+                    directory: (isVisible && !isSearchActive) ? navigation.current : nil
                 ) {
                     reload()
                 }
@@ -231,6 +314,9 @@ struct FileBrowserView: View {
             }
             .onChange(of: navigation.current) { _, _ in
                 cancelRename()
+                // A folder change invalidates whatever preview is showing.
+                QuickLookController.shared.close()
+                DocumentPreviewController.shared.close()
                 selection = []
                 if searchScope == .currentFolder, isSearchActive {
                     scheduleSearch()
@@ -243,7 +329,8 @@ struct FileBrowserView: View {
             }
             .onChange(of: selection) { _, _ in
                 selectionMarkedAt = Date()
-                if let renamingURL, !selection.contains(renamingURL) {
+                syncQuickLookIfOpen()
+                if let renamingItem, !selection.contains(renamingItem) {
                     cancelRename()
                 }
             }
@@ -269,6 +356,17 @@ struct FileBrowserView: View {
             .sheet(item: $quickDiffRequest) { request in
                 QuickDiffView(left: request.left, right: request.right)
             }
+            .sheet(isPresented: $showsGoToFolder) {
+                GoToFolderSheet(currentDirectory: goToFolderRoot) { folder, selection in
+                    navigateToFolder(folder, selecting: selection)
+                }
+            }
+            .sheet(item: $hostKeyCandidate) { candidate in
+                SSHHostKeyVerificationSheet(candidate: candidate) {
+                    hostKeyRequired = nil
+                    reload()
+                }
+            }
             .background {
                 shortcutButtons
             }
@@ -278,7 +376,7 @@ struct FileBrowserView: View {
         content
             .onKeyPress(keys: [.escape], phases: .down) { _ in
                 guard isActive else { return .ignored }
-                if renamingURL != nil {
+                if renamingItem != nil {
                     cancelRename()
                     return .handled
                 }
@@ -300,13 +398,20 @@ struct FileBrowserView: View {
             }
             .onKeyPress(.return) {
                 guard isActive else { return .ignored }
-                if renamingURL != nil || searchFocused { return .ignored }
+                if renamingItem != nil || searchFocused { return .ignored }
                 return openSelection()
             }
             .onKeyPress(.delete) {
                 guard isActive else { return .ignored }
-                if renamingURL != nil || searchFocused { return .ignored }
+                if renamingItem != nil || searchFocused { return .ignored }
                 return moveSelectionToTrash()
+            }
+            .onKeyPress(.space) {
+                guard isActive else { return .ignored }
+                // Only the text field itself should swallow Space — search
+                // results stay previewable once focus moves to the listing.
+                if renamingItem != nil || searchFocused { return .ignored }
+                return toggleQuickLook()
             }
             .focusable()
             .focused($listFocused)
@@ -401,12 +506,26 @@ struct FileBrowserView: View {
             } else {
                 presentSearch()
             }
+        case .quickLook:
+            _ = toggleQuickLook()
+        case .goToFolder:
+            presentGoToFolder()
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let searchError, isSearchActive {
+        if let hostKeyRequired {
+            hostKeyContent(connectionID: hostKeyRequired)
+        } else if let authenticationRequired {
+            authenticationContent(connectionID: authenticationRequired)
+        } else if let connectionRequired {
+            disconnectedContent(connectionID: connectionRequired)
+        } else if isLoading && entries.isEmpty {
+            ProgressView("Connecting…")
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let searchError, isSearchActive {
             ContentUnavailableView(
                 "Search failed",
                 systemImage: "exclamationmark.magnifyingglass",
@@ -424,7 +543,7 @@ struct FileBrowserView: View {
             ContentUnavailableView(
                 "Empty folder",
                 systemImage: "folder",
-                description: Text(path.path)
+                description: Text(navigation.current.path)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -432,7 +551,7 @@ struct FileBrowserView: View {
             .onDrop(
                 of: [.fileURL],
                 delegate: FolderDropDelegate(
-                    destination: path,
+                    destination: navigation.current,
                     dragState: dragState,
                     isTargeted: nil,
                     onTransfer: handleTransfer
@@ -440,6 +559,69 @@ struct FileBrowserView: View {
             )
         } else {
             browserBody(entries: visibleEntries, showsLocation: false)
+        }
+    }
+
+    private func disconnectedContent(connectionID: ConnectionID) -> some View {
+        let profile = SSHLocationStore.shared.profile(connectionID: connectionID)
+        return ContentUnavailableView {
+            Label("SSH Location Disconnected", systemImage: "network.slash")
+        } description: {
+            VStack(spacing: 4) {
+                Text(profile?.displayName ?? "SSH Location")
+                Text(navigation.current.path)
+                    .font(.caption.monospaced())
+            }
+        } actions: {
+            Button("Reconnect") { reload() }
+            Button("Copy Remote Path") {
+                WorkspaceActions.copyPaths([navigation.current])
+            }
+        }
+    }
+
+    private func hostKeyContent(connectionID: ConnectionID) -> some View {
+        ContentUnavailableView {
+            Label("Verify SSH Host Key", systemImage: "lock.shield")
+        } description: {
+            VStack(spacing: 4) {
+                Text("Arbor will not accept a new or changed host key silently.")
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                }
+            }
+        } actions: {
+            Button("Inspect Host Key") {
+                inspectHostKey(connectionID: connectionID)
+            }
+            Button("Copy Remote Path") {
+                WorkspaceActions.copyPaths([navigation.current])
+            }
+        }
+    }
+
+    private func authenticationContent(connectionID: ConnectionID) -> some View {
+        let profile = SSHLocationStore.shared.profile(connectionID: connectionID)
+        return ContentUnavailableView {
+            Label("SSH Authentication Required", systemImage: "person.badge.key")
+        } description: {
+            Text("OpenSSH could not authenticate to \(profile?.endpoint.displayDestination ?? "this host"). Add the key to ssh-agent or update ~/.ssh/config, then retry.")
+        } actions: {
+            Button("Retry") { reload() }
+        }
+    }
+
+    private func inspectHostKey(connectionID: ConnectionID) {
+        guard let profile = SSHLocationStore.shared.profile(connectionID: connectionID) else {
+            return
+        }
+        Task {
+            do {
+                hostKeyCandidate = try await SSHHostKeyService.inspect(profile)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -468,11 +650,11 @@ struct FileBrowserView: View {
                 entries: entries,
                 selection: $selection,
                 sortOrder: tableSortOrder,
-                renamingURL: $renamingURL,
+                renamingItem: $renamingItem,
                 renameDraft: $renameDraft,
                 settings: displaySettings,
-                relativeRoot: isSearchActive ? relativeRoot : path,
-                currentFolder: isSearchActive ? nil : path,
+                relativeRoot: relativeRoot,
+                currentFolder: isSearchActive ? nil : navigation.current,
                 showsLocation: showsLocation,
                 dragState: dragState,
                 onOpenRow: { entry in
@@ -490,10 +672,10 @@ struct FileBrowserView: View {
             FileIconView(
                 entries: entries,
                 selection: $selection,
-                renamingURL: $renamingURL,
+                renamingItem: $renamingItem,
                 renameDraft: $renameDraft,
                 iconMetrics: displaySettings.iconMetrics,
-                currentFolder: isSearchActive ? nil : path,
+                currentFolder: isSearchActive ? nil : navigation.current,
                 dragState: dragState,
                 onOpen: { entry in
                     cancelRename()
@@ -504,6 +686,7 @@ struct FileBrowserView: View {
                 onCommitRename: commitRename,
                 onCancelRename: cancelRename,
                 onDeleteSelection: { _ = moveSelectionToTrash() },
+                onQuickLook: { _ = toggleQuickLook() },
                 contextMenu: { entry in entryContextMenu(anchor: entry) },
                 emptySpaceMenu: { emptySpaceContextMenu }
             )
@@ -513,18 +696,23 @@ struct FileBrowserView: View {
     @ViewBuilder
     private var emptySpaceContextMenu: some View {
         if !isSearchActive {
-            Button("New Folder…") {
-                beginCreateItem(.folder)
+            if capabilities.contains(.create) {
+                Button("New Folder…") {
+                    beginCreateItem(.folder)
+                }
+                Button("New Empty File…") {
+                    beginCreateItem(.file)
+                }
+                Divider()
             }
-            Button("New Empty File…") {
-                beginCreateItem(.file)
-            }
-            Divider()
-            Button("Run Agent Here…") {
-                AgentRunCoordinator.shared.presentRunAgent(folder: path)
-            }
-            Button("Open in Cursor") {
-                WorkspaceActions.openInCursor(at: path)
+            let context = ExecutionContext(workingDirectory: navigation.current)
+            if context.supportsLocalExecution {
+                Button("Run Agent Here…") {
+                    AgentRunCoordinator.shared.presentRunAgent(context: context)
+                }
+                Button("Open in Cursor") {
+                    WorkspaceActions.openInCursor(at: navigation.current)
+                }
             }
         }
     }
@@ -532,7 +720,7 @@ struct FileBrowserView: View {
     private var emptySearchDescription: String {
         switch searchScope {
         case .currentFolder:
-            return "No matches in \(path.lastPathComponent)"
+            return "No matches in \(navigation.current.name)"
         case .global:
             return "No matches in your home folder"
         }
@@ -544,9 +732,11 @@ struct FileBrowserView: View {
     private func entryContextMenu(anchor: FileEntry) -> some View {
         let targets = previewTargets(for: anchor)
 
-        Button(targets.count == 1 ? "Open" : "Open \(targets.count) Items") {
-            commitContextSelection(anchor: anchor)
-            openTargets(previewTargets(for: anchor), fromDoubleClick: false)
+        if canOpen(targets) {
+            Button(targets.count == 1 ? "Open" : "Open \(targets.count) Items") {
+                commitContextSelection(anchor: anchor)
+                openTargets(previewTargets(for: anchor), fromDoubleClick: false)
+            }
         }
 
         if targets.count == 1, let only = targets.first, only.isBrowsable {
@@ -565,14 +755,26 @@ struct FileBrowserView: View {
         if isSearchActive, targets.count == 1, let only = targets.first, !only.isBrowsable {
             Button("Show Enclosing Folder") {
                 commitContextSelection(anchor: anchor)
-                navigate(to: only.id.deletingLastPathComponent())
+                if let parent = only.id.parent {
+                    navigate(to: parent)
+                }
                 clearSearch()
             }
         }
 
-        Button("Show in Finder") {
-            commitContextSelection(anchor: anchor)
-            WorkspaceActions.revealInFinder(previewTargets(for: anchor).map(\.id))
+        let localURLs = targets.compactMap(\.localURL)
+        if localURLs.count == targets.count {
+            Button("Show in Finder") {
+                commitContextSelection(anchor: anchor)
+                WorkspaceActions.revealInFinder(previewTargets(for: anchor).map(\.id))
+            }
+        }
+
+        if targets.allSatisfy({ $0.localURL != nil }) {
+            Button("Quick Look") {
+                commitContextSelection(anchor: anchor)
+                _ = toggleQuickLook()
+            }
         }
 
         if canQuickDiff(targets) {
@@ -583,7 +785,10 @@ struct FileBrowserView: View {
             .keyboardShortcut("d", modifiers: .command)
         }
 
-        if targets.count == 1, let only = targets.first {
+        if capabilities.contains(.rename),
+           targets.count == 1,
+           let only = targets.first
+        {
             Button("Rename") {
                 commitContextSelection(anchor: anchor)
                 beginRename(only)
@@ -596,7 +801,7 @@ struct FileBrowserView: View {
             if !toAdd.isEmpty {
                 Button(toAdd.count == 1 ? "Add to Favorites" : "Add to Favorites (\(toAdd.count))") {
                     commitContextSelection(anchor: anchor)
-                    favorites.add(urls: toAdd.map(\.id))
+                    favorites.add(items: toAdd.map(\.id))
                 }
             }
         }
@@ -614,40 +819,54 @@ struct FileBrowserView: View {
 
         Divider()
 
-        Button("New Terminal Here") {
-            commitContextSelection(anchor: anchor)
-            let resolved = previewTargets(for: anchor)
-            WorkspaceActions.openTerminal(at: WorkspaceActions.terminalDirectory(for: resolved))
-        }
-        .help(targets.count > 1 ? "Opens at the shared folder for this selection" : "")
+        if localURLs.count == targets.count {
+            Button("New Terminal Here") {
+                commitContextSelection(anchor: anchor)
+                let resolved = previewTargets(for: anchor)
+                WorkspaceActions.openTerminal(
+                    context: WorkspaceActions.executionContext(for: resolved)
+                )
+            }
+            .help(targets.count > 1 ? "Opens at the shared folder for this selection" : "")
 
-        Button("Run Agent Here…") {
-            commitContextSelection(anchor: anchor)
-            let resolved = previewTargets(for: anchor)
-            AgentRunCoordinator.shared.presentRunAgent(
-                folder: WorkspaceActions.terminalDirectory(for: resolved),
-                selection: resolved.map(\.id)
-            )
-        }
+            Button("Run Agent Here…") {
+                commitContextSelection(anchor: anchor)
+                let resolved = previewTargets(for: anchor)
+                AgentRunCoordinator.shared.presentRunAgent(
+                    context: WorkspaceActions.executionContext(for: resolved)
+                )
+            }
 
-        Button("Open in Cursor") {
-            commitContextSelection(anchor: anchor)
-            let resolved = previewTargets(for: anchor)
-            WorkspaceActions.openInCursor(at: WorkspaceActions.terminalDirectory(for: resolved))
-        }
-
-        Divider()
-
-        Button(targets.count > 1 ? "Get Info (\(targets.count))…" : "Get Info…") {
-            commitContextSelection(anchor: anchor)
-            showInfo(for: previewTargets(for: anchor))
+            Button("Open in Cursor") {
+                commitContextSelection(anchor: anchor)
+                let resolved = previewTargets(for: anchor)
+                WorkspaceActions.openInCursor(
+                    at: WorkspaceActions.executionContext(for: resolved).workingDirectory
+                )
+            }
         }
 
         Divider()
 
-        Button("Move to Trash", role: .destructive) {
-            commitContextSelection(anchor: anchor)
-            trashEntries(previewTargets(for: anchor))
+        if capabilities.contains(.metadata) {
+            Button(targets.count > 1 ? "Get Info (\(targets.count))…" : "Get Info…") {
+                commitContextSelection(anchor: anchor)
+                showInfo(for: previewTargets(for: anchor))
+            }
+        }
+
+        if capabilities.contains(.trash) {
+            Divider()
+            Button("Move to Trash", role: .destructive) {
+                commitContextSelection(anchor: anchor)
+                trashEntries(previewTargets(for: anchor))
+            }
+        } else if capabilities.contains(.remove) {
+            Divider()
+            Button("Delete Permanently…", role: .destructive) {
+                commitContextSelection(anchor: anchor)
+                permanentDeleteTargets = previewTargets(for: anchor)
+            }
         }
     }
 
@@ -657,6 +876,113 @@ struct FileBrowserView: View {
             return selected.isEmpty ? [anchor] : selected
         }
         return [anchor]
+    }
+
+    // MARK: - Quick Look
+
+    /// URLs offered to Quick Look, plus the index to open on.
+    ///
+    /// Finder previews the whole listing when you press Space, so Up/Down walk
+    /// the folder from the selected item. Anything without a local URL (remote
+    /// providers) falls back to just the selection.
+    private func quickLookPayload() -> (urls: [URL], startIndex: Int)? {
+        let targets = selectedVisibleEntries()
+        guard let anchor = targets.first, let anchorURL = anchor.localURL else { return nil }
+
+        let allURLs = visibleEntries.compactMap(\.localURL)
+        if allURLs.count == visibleEntries.count,
+           let startIndex = allURLs.firstIndex(of: anchorURL)
+        {
+            return (allURLs, startIndex)
+        }
+
+        // Mixed/remote listing: preview only what can be previewed.
+        let urls = targets.compactMap(\.localURL)
+        guard urls.count == targets.count,
+              let index = urls.firstIndex(of: anchorURL)
+        else { return nil }
+        return (urls, index)
+    }
+
+    /// Markdown and source code get Arbor's renderer (Quick Look shows raw
+    /// text); everything else goes to the system preview panel.
+    private func documentPreviewTarget() -> URL? {
+        let targets = selectedVisibleEntries()
+        guard targets.count == 1, let only = targets.first, !only.isBrowsable else { return nil }
+        guard let url = only.localURL, DocumentPreviewController.previewKind(for: url) != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private func toggleQuickLook() -> KeyPress.Result {
+        if let document = documentPreviewTarget() {
+            QuickLookController.shared.close()
+            DocumentPreviewController.shared.toggle(document)
+            return .handled
+        }
+
+        guard let payload = quickLookPayload() else { return .ignored }
+        DocumentPreviewController.shared.close()
+        QuickLookController.shared.onIndexChange = { index in
+            syncSelectionFromQuickLook(index: index)
+        }
+        QuickLookController.shared.toggle(urls: payload.urls, startIndex: payload.startIndex)
+        return .handled
+    }
+
+    /// Arrow keys inside the panel move the panel; mirror that in the listing.
+    private func syncSelectionFromQuickLook(index: Int) {
+        guard visibleEntries.indices.contains(index) else { return }
+        selection = [visibleEntries[index].id]
+    }
+
+    /// Keep the panel in step when the selection changes while it is open.
+    private func syncQuickLookIfOpen() {
+        guard QuickLookController.shared.isVisible else { return }
+        guard let payload = quickLookPayload() else {
+            QuickLookController.shared.close()
+            return
+        }
+        QuickLookController.shared.sync(urls: payload.urls, startIndex: payload.startIndex)
+    }
+
+    // MARK: - Go to Folder
+
+    /// Root used to resolve relative input and for the sheet's hint.
+    private var goToFolderRoot: URL {
+        if let local = navigation.current.localURL { return local }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    private func presentGoToFolder() {
+        guard capabilities.contains(.list) else { return }
+        showsGoToFolder = true
+    }
+
+    private func navigateToFolder(_ folder: URL, selecting file: URL?) {
+        let target = LocalFileLocation.item(for: folder)
+        let selectionItem = file.map { LocalFileLocation.item(for: $0) }
+        pendingSelection = selectionItem
+
+        guard target != navigation.current else {
+            // Already here: refresh, then select through `pendingSelection` so
+            // the selection lands after the reload rebuilds the rows.
+            reload()
+            return
+        }
+        navigate(to: target)
+    }
+
+    /// Applied by `reload()` once the destination listing exists.
+    private func applyPendingSelection() {
+        guard let pending = pendingSelection else { return }
+        guard entries.contains(where: { $0.id == pending }) else {
+            // Destination may still be loading; keep it for the next reload.
+            return
+        }
+        selection = [pending]
+        pendingSelection = nil
     }
 
     private func commitContextSelection(anchor: FileEntry) {
@@ -670,14 +996,25 @@ struct FileBrowserView: View {
     }
 
     private func canQuickDiff(_ targets: [FileEntry]) -> Bool {
-        targets.count == 2 && targets.allSatisfy { !$0.isBrowsable }
+        targets.count == 2
+            && targets.allSatisfy { !$0.isBrowsable && $0.localURL != nil }
+    }
+
+    private func canOpen(_ targets: [FileEntry]) -> Bool {
+        if targets.count == 1, targets.first?.isBrowsable == true {
+            return true
+        }
+        return capabilities.contains(.localMaterialization)
     }
 
     private func presentQuickDiff(for targets: [FileEntry]) {
-        guard canQuickDiff(targets) else { return }
+        guard canQuickDiff(targets),
+              let left = targets[0].localURL,
+              let right = targets[1].localURL
+        else { return }
         quickDiffRequest = QuickDiffRequest(
-            left: targets[0].id,
-            right: targets[1].id
+            left: left,
+            right: right
         )
     }
 
@@ -697,7 +1034,11 @@ struct FileBrowserView: View {
 
         let query = trimmed
         let scope = searchScope
-        let folder = path
+        guard let folder = localPath else {
+            searchError = "Search is not available for this location."
+            isSearching = false
+            return
+        }
         let includeHidden = showHiddenFiles
         isSearching = true
         searchError = nil
@@ -736,6 +1077,16 @@ struct FileBrowserView: View {
         }
     }
 
+    /// Finder behavior: Down/Up from the search field hands focus to the results,
+    /// selecting the first/last hit so Return opens it.
+    private func focusSearchResult(last: Bool) {
+        guard isSearchActive, !isSearching, !visibleEntries.isEmpty else { return }
+        searchFocused = false
+        listFocused = true
+        let index = last ? visibleEntries.index(before: visibleEntries.endIndex) : visibleEntries.startIndex
+        selection = [visibleEntries[index].id]
+    }
+
     private func clearSearch() {
         searchTask?.cancel()
         searchQuery = ""
@@ -748,6 +1099,7 @@ struct FileBrowserView: View {
     }
 
     private func presentSearch() {
+        guard localPath != nil, capabilities.contains(.search) else { return }
         isSearchPresented = true
         DispatchQueue.main.async {
             searchFocused = true
@@ -761,19 +1113,67 @@ struct FileBrowserView: View {
     }
 
     private func reload() {
-        do {
-            entries = try LocalFileService.list(path: path, showHiddenFiles: showHiddenFiles)
-            errorMessage = nil
-            pruneSelection(to: Set(entries.map(\.id)))
-        } catch {
-            entries = []
-            selection = []
-            errorMessage = error.localizedDescription
+        listingTask?.cancel()
+        isLoading = true
+
+        let requestedDirectory = navigation.current
+        let options = FileProviderListingOptions(showHiddenFiles: showHiddenFiles)
+        listingTask = Task {
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: requestedDirectory)
+                let providerEntries = try await provider.list(
+                    directory: requestedDirectory,
+                    options: options
+                )
+                try Task.checkCancellation()
+                guard navigation.current == requestedDirectory else {
+                    return
+                }
+
+                entries = providerEntries.map { FileEntry(providerEntry: $0) }
+                errorMessage = nil
+                connectionRequired = nil
+                hostKeyRequired = nil
+                authenticationRequired = nil
+                isLoading = false
+                pruneSelection(to: Set(entries.map(\.id)))
+                refreshVisibleEntries()
+                applyPendingSelection()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard navigation.current == requestedDirectory else {
+                    return
+                }
+                entries = []
+                selection = []
+                errorMessage = error.localizedDescription
+                isLoading = false
+                switch error {
+                case FileProviderError.connectionRequired(let connectionID),
+                     FileProviderError.connectionLost(let connectionID, _):
+                    connectionRequired = connectionID
+                    hostKeyRequired = nil
+                    authenticationRequired = nil
+                case FileProviderError.hostKeyVerificationRequired(let connectionID):
+                    hostKeyRequired = connectionID
+                    connectionRequired = nil
+                    authenticationRequired = nil
+                case FileProviderError.authenticationRequired(let connectionID):
+                    authenticationRequired = connectionID
+                    connectionRequired = nil
+                    hostKeyRequired = nil
+                default:
+                    connectionRequired = nil
+                    hostKeyRequired = nil
+                    authenticationRequired = nil
+                }
+                refreshVisibleEntries()
+            }
         }
-        refreshVisibleEntries()
     }
 
-    private func pruneSelection(to valid: Set<URL>) {
+    private func pruneSelection(to valid: Set<ItemRef>) {
         selection = selection.intersection(valid)
     }
 
@@ -787,6 +1187,10 @@ struct FileBrowserView: View {
         navigation.go(to: url)
     }
 
+    private func navigate(to item: ItemRef) {
+        navigation.go(to: item)
+    }
+
     private func goBack() {
         navigation.goBack()
     }
@@ -796,8 +1200,7 @@ struct FileBrowserView: View {
     }
 
     private func goToParent() {
-        let parent = path.deletingLastPathComponent()
-        if parent.path != path.path {
+        if let parent = navigation.current.parent {
             navigate(to: parent)
         }
     }
@@ -829,6 +1232,9 @@ struct FileBrowserView: View {
 
         let files = targets.filter { !$0.isBrowsable }
         let folders = targets.filter(\.isBrowsable)
+        guard files.isEmpty || capabilities.contains(.localMaterialization) else {
+            return
+        }
 
         for file in files {
             WorkspaceActions.open(file.id)
@@ -842,56 +1248,100 @@ struct FileBrowserView: View {
 
     private func showInfo(for targets: [FileEntry]) {
         if targets.count == 1, let only = targets.first {
-            do {
-                details = try LocalFileService.details(for: only.id)
-            } catch {
-                errorMessage = error.localizedDescription
+            detailsTask?.cancel()
+            let requestedItem = only.id
+            detailsTask = Task {
+                do {
+                    let provider = try FileProviderRegistry.shared.provider(for: requestedItem)
+                    let providerDetails = try await provider.details(for: requestedItem)
+                    try Task.checkCancellation()
+                    details = FileDetails(providerDetails: providerDetails)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
             }
             return
         }
 
+        detailsTask?.cancel()
         multiInfo = MultiSelectionInfo(entries: targets)
     }
 
     private func handleTransfer(
-        _ sources: [URL],
-        into destination: URL,
+        _ sourceItems: [ItemRef],
+        into destinationItem: ItemRef,
         operation: FileTransferOperation
     ) {
-        let result = FileOperations.transfer(sources, into: destination, operation: operation)
-        if !result.failed.isEmpty {
-            let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
-            let verbPast = operation == .copy ? "copied" : "moved"
+        guard !sourceItems.isEmpty else { return }
+        guard capabilities.contains(.transfer) else {
             transferErrorTitle = operation.failureTitle
-            transferErrorMessage = result.transferred.isEmpty
-                ? "Could not \(operation == .copy ? "copy" : "move"): \(names)"
-                : "Some items could not be \(verbPast): \(names)"
+            transferErrorMessage = "This location does not support file transfers."
+            return
         }
+        let sources = sourceItems
+        let destination = destinationItem
+        let providerOperation = operation.providerOperation
 
-        let newSelection = Set(result.transferred.map(\.to))
-        if !result.transferred.isEmpty {
-            switch operation {
-            case .move:
-                undoStack.register(.move(result.transferred))
-            case .copy:
-                undoStack.register(.copy(result.transferred))
+        mutationTask = Task {
+            var transferred: [(from: ItemRef, to: ItemRef)] = []
+            var failed: [(ItemRef, Error)] = []
+
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: destination)
+                for source in sources {
+                    if source == destination { continue }
+                    if operation == .move, source.parent == destination { continue }
+                    do {
+                        let receipt = try await provider.transfer(
+                            source,
+                            into: destination,
+                            operation: providerOperation
+                        )
+                        transferred.append((receipt.from, receipt.to))
+                    } catch {
+                        failed.append((source, error))
+                    }
+                }
+            } catch {
+                transferErrorTitle = operation.failureTitle
+                transferErrorMessage = error.localizedDescription
+                return
             }
-        }
-        if isSearchActive {
-            scheduleSearch()
-            selection = newSelection
-        } else {
-            reload()
-            selection = newSelection
-        }
 
-        var affected = [destination]
-        if operation == .move {
-            affected.append(contentsOf: result.transferred.map {
-                $0.from.deletingLastPathComponent()
-            })
+            if !failed.isEmpty {
+                let names = failed.map { $0.0.name }.joined(separator: ", ")
+                let verbPast = operation == .copy ? "copied" : "moved"
+                transferErrorTitle = operation.failureTitle
+                transferErrorMessage = transferred.isEmpty
+                    ? "Could not \(operation == .copy ? "copy" : "move"): \(names)"
+                    : "Some items could not be \(verbPast): \(names)"
+            }
+
+            let newSelection = Set(transferred.map(\.to))
+            if !transferred.isEmpty {
+                switch operation {
+                case .move:
+                    undoStack.register(.move(transferred))
+                case .copy:
+                    undoStack.register(.copy(transferred))
+                }
+            }
+
+            if isSearchActive {
+                scheduleSearch()
+            } else {
+                reload()
+            }
+            selection = newSelection
+
+            var affected = [destination]
+            if operation == .move {
+                affected.append(contentsOf: transferred.compactMap(\.from.parent))
+            }
+            BrowserListingDidChange.post(folders: affected)
         }
-        BrowserListingDidChange.post(folders: affected)
     }
 
     private func beginCreateItem(_ kind: CreateItemKind) {
@@ -900,67 +1350,80 @@ struct FileBrowserView: View {
     }
 
     private func confirmCreateItem() {
+        guard capabilities.contains(.create) else { return }
         guard let createDialog else { return }
         let name = newItemName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
 
-        do {
-            let created: URL
-            let isDirectory: Bool
-            switch createDialog.kind {
-            case .folder:
-                created = try FileOperations.createFolder(in: path, named: name)
-                isDirectory = true
-            case .file:
-                created = try FileOperations.createEmptyFile(in: path, named: name)
-                isDirectory = false
+        let kind = createDialog.kind
+        let parent = navigation.current
+        self.createDialog = nil
+
+        mutationTask = Task {
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: parent)
+                let created: FileProviderEntry
+                let isDirectory: Bool
+                switch kind {
+                case .folder:
+                    created = try await provider.createDirectory(in: parent, name: name)
+                    isDirectory = true
+                case .file:
+                    created = try await provider.createFile(in: parent, name: name, contents: Data())
+                    isDirectory = false
+                }
+                undoStack.register(.create(item: created.id, isDirectory: isDirectory))
+                reload()
+                selection = [created.id]
+                BrowserListingDidChange.post(folders: [parent])
+            } catch {
+                createErrorMessage = error.localizedDescription
             }
-            self.createDialog = nil
-            undoStack.register(.create(url: created, isDirectory: isDirectory))
-            reload()
-            selection = [created]
-            BrowserListingDidChange.post(folders: [path])
-        } catch {
-            self.createDialog = nil
-            createErrorMessage = error.localizedDescription
         }
     }
 
     private func performUndo() {
         guard undoStack.canUndo else { return }
-        let result = undoStack.undo()
-        if let error = result.errorMessage {
-            undoErrorMessage = error
+        Task {
+            let result = await undoStack.undo()
+            if let error = result.errorMessage {
+                undoErrorMessage = error
+            }
+            refreshAfterUndoRedo(
+                selecting: result.restoredSelection,
+                affectedFolders: result.affectedFolders
+            )
         }
-        refreshAfterUndoRedo(
-            selecting: result.restoredSelection,
-            affectedFolders: result.affectedFolders
-        )
     }
 
     private func performRedo() {
         guard undoStack.canRedo else { return }
-        let result = undoStack.redo()
-        if let error = result.errorMessage {
-            undoErrorMessage = error
+        Task {
+            let result = await undoStack.redo()
+            if let error = result.errorMessage {
+                undoErrorMessage = error
+            }
+            refreshAfterUndoRedo(
+                selecting: result.restoredSelection,
+                affectedFolders: result.affectedFolders
+            )
         }
-        refreshAfterUndoRedo(
-            selecting: result.restoredSelection,
-            affectedFolders: result.affectedFolders
-        )
     }
 
-    private func refreshAfterUndoRedo(selecting newSelection: Set<URL>, affectedFolders: [URL]) {
+    private func refreshAfterUndoRedo(
+        selecting selectedItems: Set<ItemRef>,
+        affectedFolders affectedItems: [ItemRef]
+    ) {
         cancelRename()
         if isSearchActive {
             scheduleSearch()
         } else {
             reload()
         }
-        selection = newSelection
-        var folders = affectedFolders
-        folders.append(path)
-        folders.append(contentsOf: newSelection.map { $0.deletingLastPathComponent() })
+        selection = selectedItems
+        var folders = affectedItems
+        folders.append(navigation.current)
+        folders.append(contentsOf: selectedItems.compactMap(\.parent))
         BrowserListingDidChange.post(folders: folders)
     }
 
@@ -968,6 +1431,7 @@ struct FileBrowserView: View {
 
     @discardableResult
     private func moveSelectionToTrash() -> KeyPress.Result {
+        guard capabilities.contains(.trash) else { return .ignored }
         let targets = visibleEntries.filter { selection.contains($0.id) }
         guard !targets.isEmpty else { return .ignored }
         trashEntries(targets)
@@ -977,34 +1441,77 @@ struct FileBrowserView: View {
     private func trashEntries(_ entries: [FileEntry]) {
         guard !entries.isEmpty else { return }
         cancelRename()
-        let result = FileOperations.trash(entries.map(\.id))
+        let items = entries.map(\.id)
 
-        if !result.failed.isEmpty {
-            let names = result.failed.map { $0.0.lastPathComponent }.joined(separator: ", ")
-            transferErrorTitle = "Move to Trash Failed"
-            transferErrorMessage = result.trashed.isEmpty
-                ? "Could not move to Trash: \(names)"
-                : "Some items could not be moved to Trash: \(names)"
+        mutationTask = Task {
+            var trashed: [ItemRef] = []
+            var undoable: [(from: ItemRef, trashItem: ItemRef)] = []
+            var failed: [(ItemRef, Error)] = []
+
+            for item in items {
+                do {
+                    let provider = try FileProviderRegistry.shared.provider(for: item)
+                    let receipt = try await provider.trash(item)
+                    trashed.append(receipt.original)
+                    if let trashItem = receipt.trashedItem {
+                        undoable.append((receipt.original, trashItem))
+                    }
+                } catch {
+                    failed.append((item, error))
+                }
+            }
+
+            if !failed.isEmpty {
+                let names = failed.map { $0.0.name }.joined(separator: ", ")
+                transferErrorTitle = "Move to Trash Failed"
+                transferErrorMessage = trashed.isEmpty
+                    ? "Could not move to Trash: \(names)"
+                    : "Some items could not be moved to Trash: \(names)"
+            }
+
+            if !undoable.isEmpty {
+                undoStack.register(.trash(undoable))
+            }
+
+            if isSearchActive {
+                scheduleSearch()
+            } else {
+                reload()
+            }
+            selection = []
+            BrowserListingDidChange.post(folders: trashed.compactMap(\.parent))
         }
+    }
 
-        if !result.trashed.isEmpty {
-            undoStack.register(.trash(result.trashed))
-        }
-
-        if isSearchActive {
-            scheduleSearch()
-        } else {
+    private func permanentlyDeletePendingItems() {
+        let items = permanentDeleteTargets.map(\.id)
+        permanentDeleteTargets = []
+        guard !items.isEmpty else { return }
+        mutationTask = Task {
+            var removed: [ItemRef] = []
+            var failed: [ItemRef] = []
+            for item in items {
+                do {
+                    let provider = try FileProviderRegistry.shared.provider(for: item)
+                    try await provider.remove(item)
+                    removed.append(item)
+                } catch {
+                    failed.append(item)
+                }
+            }
+            if !failed.isEmpty {
+                transferErrorTitle = "Delete Failed"
+                transferErrorMessage = "Could not permanently delete: \(failed.map(\.name).joined(separator: ", "))"
+            }
             reload()
+            selection = []
+            BrowserListingDidChange.post(folders: removed.compactMap(\.parent))
         }
-        selection = []
-        BrowserListingDidChange.post(folders: result.trashed.map {
-            $0.from.deletingLastPathComponent()
-        })
     }
 
     // MARK: - Rename
     private func handleNameClick(_ entry: FileEntry) {
-        if renamingURL == entry.id { return }
+        if renamingItem == entry.id { return }
 
         if selection != [entry.id] {
             selection = [entry.id]
@@ -1020,48 +1527,61 @@ struct FileBrowserView: View {
     }
 
     private func beginRename(_ entry: FileEntry) {
+        guard capabilities.contains(.rename) else { return }
         selection = [entry.id]
         renameDraft = entry.name
-        renamingURL = entry.id
+        renamingItem = entry.id
     }
 
     private func cancelRename() {
-        renamingURL = nil
+        renamingItem = nil
         renameDraft = ""
     }
 
     private func commitRename() {
-        guard let renamingURL else { return }
-        let url = renamingURL
+        guard let renamingItem else { return }
+        let source = renamingItem
+        let draft = renameDraft
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            renameErrorMessage = FileOperations.RenameError.emptyName.localizedDescription
+            return
+        }
+        guard !trimmed.contains("/") else {
+            renameErrorMessage = FileOperations.RenameError.invalidName.localizedDescription
+            return
+        }
 
-        do {
-            let result = try FileOperations.rename(url, to: renameDraft)
-            cancelRename()
-            if result.from != result.to {
-                undoStack.register(.rename(from: result.from, to: result.to))
+        mutationTask = Task {
+            do {
+                let provider = try FileProviderRegistry.shared.provider(for: source)
+                let receipt = try await provider.rename(source, to: trimmed)
+                cancelRename()
+                if receipt.from != receipt.to {
+                    undoStack.register(.rename(from: receipt.from, to: receipt.to))
+                }
+                if isSearchActive {
+                    scheduleSearch()
+                } else {
+                    reload()
+                }
+                selection = [receipt.to]
+                BrowserListingDidChange.post(folders: [
+                    receipt.from.parent,
+                    receipt.to.parent,
+                ].compactMap { $0 })
+            } catch FileProviderError.alreadyExists {
+                renameErrorMessage = FileOperations.RenameError.nameExists(trimmed).localizedDescription
+            } catch {
+                renameErrorMessage = error.localizedDescription
             }
-            if isSearchActive {
-                scheduleSearch()
-            } else {
-                reload()
-            }
-            selection = [result.to]
-            BrowserListingDidChange.post(folders: [
-                result.from.deletingLastPathComponent(),
-                result.to.deletingLastPathComponent(),
-            ])
-        } catch FileOperations.RenameError.unchanged {
-            cancelRename()
-        } catch {
-            renameErrorMessage = error.localizedDescription
-            // Stay in rename mode so the user can fix the name.
         }
     }
 
     /// Other panes / tabs showing an affected folder should refresh without remounting.
-    private func handleRemoteListingChange(_ folders: [URL]) {
-        let affected = Set(folders.map(\.standardizedFileURL))
-        guard affected.contains(path.standardizedFileURL) else { return }
+    private func handleRemoteListingChange(_ folders: [ItemRef]) {
+        let affected = Set(folders)
+        guard affected.contains(navigation.current) else { return }
         if isSearchActive {
             scheduleSearch()
         } else {
@@ -1073,14 +1593,14 @@ struct FileBrowserView: View {
 private struct FileBrowserFocusedSceneModifier: ViewModifier {
     var isActive: Bool
     var displaySettings: BrowserDisplaySettings
-    var folderURL: URL
+    var folderItem: ItemRef
 
     func body(content: Content) -> some View {
         // Always apply the same modifier chain so activating a split pane does not
         // remount the browser (which re-ran onAppear → reload and snapped scroll to top).
         content
             .focusedSceneValue(\.browserDisplaySettings, isActive ? displaySettings : nil)
-            .focusedSceneValue(\.browserFolderURL, isActive ? folderURL : nil)
+            .focusedSceneValue(\.browserFolderItem, isActive ? folderItem : nil)
     }
 }
 
@@ -1125,7 +1645,9 @@ private struct FileBrowserAlertsModifier: ViewModifier {
     @Binding var createErrorMessage: String?
     @Binding var undoErrorMessage: String?
     @Binding var renameErrorMessage: String?
+    @Binding var permanentDeleteTargets: [FileEntry]
     var onConfirmCreate: () -> Void
+    var onConfirmPermanentDelete: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1175,25 +1697,44 @@ private struct FileBrowserAlertsModifier: ViewModifier {
             } message: {
                 Text(renameErrorMessage ?? "")
             }
+            .alert(
+                "Delete Permanently?",
+                isPresented: Binding(
+                    get: { !permanentDeleteTargets.isEmpty },
+                    set: { if !$0 { permanentDeleteTargets = [] } }
+                )
+            ) {
+                Button("Cancel", role: .cancel) { permanentDeleteTargets = [] }
+                Button("Delete", role: .destructive) { onConfirmPermanentDelete() }
+            } message: {
+                Text("This will permanently delete \(permanentDeleteTargets.count == 1 ? "“\(permanentDeleteTargets[0].name)”" : "\(permanentDeleteTargets.count) items"). This action cannot be undone.")
+            }
     }
 }
 
 struct BreadcrumbBar: View {
-    let path: URL
+    let directory: ItemRef
     var dragState: FileDragState = FileDragState()
-    var onNavigate: (URL) -> Void
-    var onTransfer: (([URL], URL, FileTransferOperation) -> Void)? = nil
+    var onNavigate: (ItemRef) -> Void
+    var onTransfer: (([ItemRef], ItemRef, FileTransferOperation) -> Void)? = nil
 
-    private var crumbs: [(name: String, url: URL)] {
-        var result: [(String, URL)] = []
-        var current = path.standardizedFileURL
+    private var crumbs: [(name: String, item: ItemRef)] {
+        var result: [(String, ItemRef)] = []
+        var current = directory
+        let location = FileProviderRegistry.shared.location(containing: directory)
 
         while true {
-            let name = current.path == "/" ? "Macintosh HD" : current.lastPathComponent
+            let name: String
+            if current == location?.root {
+                name = location?.displayName ?? current.name
+            } else if current.path == "/" {
+                name = current.volumeID.rawValue.hasPrefix("local:") ? "Macintosh HD" : "/"
+            } else {
+                name = current.name
+            }
             result.append((name, current))
-            if current.path == "/" { break }
-            let parent = current.deletingLastPathComponent()
-            if parent.path == current.path { break }
+            if current == location?.root { break }
+            guard let parent = current.parent else { break }
             current = parent
         }
         return result.reversed()
@@ -1210,10 +1751,10 @@ struct BreadcrumbBar: View {
                     }
 
                     Button {
-                        onNavigate(crumb.url)
+                        onNavigate(crumb.item)
                     } label: {
                         HStack(spacing: 4) {
-                            Image(nsImage: FileIcon.image(for: crumb.url, size: 14))
+                            Image(nsImage: FileIcon.image(for: crumb.item, size: 14))
                                 .resizable()
                                 .interpolation(.high)
                                 .frame(width: 14, height: 14)
@@ -1224,15 +1765,15 @@ struct BreadcrumbBar: View {
                     .buttonStyle(.plain)
                     .font(.caption)
                     .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
-                    .help(crumb.url.path)
+                    .help(crumb.item.path)
                     .onDrop(
                         of: [.fileURL],
                         delegate: FolderDropDelegate(
-                            destination: crumb.url,
+                            destination: crumb.item,
                             dragState: dragState,
                             isTargeted: nil,
-                            onTransfer: { urls, destination, operation in
-                                onTransfer?(urls, destination, operation)
+                            onTransfer: { items, destination, operation in
+                                onTransfer?(items, destination, operation)
                             }
                         )
                     )
@@ -1293,5 +1834,5 @@ private struct MultiSelectionInfoView: View {
 }
 
 extension FileDetails: Identifiable {
-    var id: URL { url }
+    var id: ItemRef { item }
 }

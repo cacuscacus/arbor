@@ -1,11 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Hooks the detail file `NSTableView` for:
+/// Hooks the detail file table for:
 /// - double-click → open
 /// - delayed second click on an already-selected name → rename
 ///
-/// Never attaches to `NSOutlineView` (sidebar).
+/// On macOS 26 SwiftUI's `Table` is backed by `SwiftUIOutlineTableView` (an
+/// `NSOutlineView` subclass), so outline views are valid detail tables. The
+/// sidebar is an outline view too; the installer lives in the detail pane and
+/// picks the table whose frame matches it, so the sidebar is never hooked.
 struct TableInteractionInstaller: NSViewRepresentable {
     var rowCount: Int
     var nameColumnIndex: Int = 0
@@ -34,8 +37,8 @@ struct TableInteractionInstaller: NSViewRepresentable {
         context.coordinator.rowCount = rowCount
         context.coordinator.nameColumnIndex = nameColumnIndex
         nsView.coordinator = context.coordinator
-        // Only re-hunt the NSTableView when installs fail or the table is gone —
-        // walking the view tree on every SwiftUI update was expensive during scroll.
+        // Only re-hunt the table when the hook is missing; reassert the hooks on
+        // every update because SwiftUI can rebuild the table's action wiring.
         nsView.scheduleInstallIfNeeded()
     }
 
@@ -61,7 +64,7 @@ struct TableInteractionInstaller: NSViewRepresentable {
         }
 
         @objc func tableClicked(_ sender: Any?) {
-            guard let table = sender as? NSTableView, !(table is NSOutlineView) else { return }
+            guard let table = sender as? NSTableView else { return }
             let row = table.clickedRow
             let column = table.clickedColumn
             guard row >= 0, row < rowCount else {
@@ -97,7 +100,7 @@ struct TableInteractionInstaller: NSViewRepresentable {
 
         @objc func tableDoubleClicked(_ sender: Any?) {
             cancelPendingRename()
-            guard let table = sender as? NSTableView, !(table is NSOutlineView) else { return }
+            guard let table = sender as? NSTableView else { return }
             let row = table.clickedRow
             guard row >= 0, row < rowCount else { return }
             onDoubleClickRow(row)
@@ -133,7 +136,10 @@ struct TableInteractionInstaller: NSViewRepresentable {
         }
 
         func scheduleInstallIfNeeded() {
-            if let hookedTable, hookedTable.window != nil {
+            if let hookedTable, hookedTable.window === window {
+                // SwiftUI may rebuild the NSTableView's action wiring during
+                // updates; reassert it cheaply so double-click never goes stale.
+                applyHooks(to: hookedTable)
                 return
             }
             scheduleInstall()
@@ -180,48 +186,56 @@ struct TableInteractionInstaller: NSViewRepresentable {
             }
 
             hookedTable = table
+            applyHooks(to: table)
+        }
+
+        private func applyHooks(to table: NSTableView) {
             table.target = coordinator
             table.action = #selector(Coordinator.tableClicked(_:))
             table.doubleAction = #selector(Coordinator.tableDoubleClicked(_:))
             table.focusRingType = .none
         }
 
+        /// The table lives in a sibling subtree of this SwiftUI background view,
+        /// so walking superviews (and stopping at NSSplitView) never found it.
+        /// Search the window instead and pick the table whose frame matches this
+        /// pane — split view has two tables and each installer must hook its own.
         private func findDetailFileTable() -> NSTableView? {
-            var view: NSView? = superview
-            while let current = view {
-                if let table = current.asFileBrowserTable() {
-                    return table
-                }
-                if let table = current.findFileBrowserTable() {
-                    return table
-                }
-                if current is NSSplitView {
-                    break
-                }
-                view = current.superview
-            }
-            return nil
-        }
-    }
-}
+            guard let window, let root = window.contentView else { return nil }
+            let targetFrame = convert(bounds, to: nil)
+            guard targetFrame.width > 1, targetFrame.height > 1 else { return nil }
 
-private extension NSView {
-    func asFileBrowserTable() -> NSTableView? {
-        guard let table = self as? NSTableView, !(self is NSOutlineView) else {
-            return nil
-        }
-        return table
-    }
+            var best: (table: NSTableView, overlap: CGFloat, distance: CGFloat)?
 
-    func findFileBrowserTable() -> NSTableView? {
-        if let table = asFileBrowserTable() {
-            return table
-        }
-        for subview in subviews {
-            if let table = subview.findFileBrowserTable() {
-                return table
+            func consider(_ table: NSTableView) {
+                guard table.window === window, !table.isHiddenOrHasHiddenAncestor else { return }
+                let frame = table.convert(table.bounds, to: nil)
+                let intersection = frame.intersection(targetFrame)
+                let overlap = intersection.isNull ? 0 : intersection.width * intersection.height
+                guard overlap > 0 else { return }
+                let distance = hypot(frame.midX - targetFrame.midX, frame.midY - targetFrame.midY)
+                if let current = best {
+                    if overlap > current.overlap
+                        || (overlap == current.overlap && distance < current.distance)
+                    {
+                        best = (table, overlap, distance)
+                    }
+                } else {
+                    best = (table, overlap, distance)
+                }
             }
+
+            func visit(_ view: NSView) {
+                if let table = view as? NSTableView {
+                    consider(table)
+                }
+                for subview in view.subviews {
+                    visit(subview)
+                }
+            }
+
+            visit(root)
+            return best?.table
         }
-        return nil
     }
 }

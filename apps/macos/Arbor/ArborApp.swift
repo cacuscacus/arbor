@@ -20,6 +20,10 @@ struct ArborApp: App {
                     AboutWindowController.shared.show()
                 }
             }
+            // `after:`, never `replacing:` — .saveItem owns Close/Close All.
+            CommandGroup(after: .saveItem) {
+                QuickLookCommand()
+            }
             CommandGroup(after: .appInfo) {
                 Button("Settings…") {
                     SettingsWindowController.shared.show()
@@ -39,10 +43,16 @@ struct ArborApp: App {
                     }
                 }
             }
+            CommandMenu("Go") {
+                GoMenuCommands()
+            }
             CommandMenu("Agent") {
                 AgentCommands()
             }
-            CommandMenu("View") {
+            // These live in the system View menu. Using CommandMenu("View") here
+            // produced a second, empty View menu on macOS 26 and dropped every
+            // custom item (Toggle Split, hidden files, Sort By, terminal, icons).
+            CommandGroup(after: .sidebar) {
                 SplitViewCommands()
                 Divider()
                 HiddenFilesCommands()
@@ -74,40 +84,77 @@ private struct WindowOpenInstaller: View {
 
 /// File → New Window (⌘N). Dock right-click uses `applicationDockMenu`.
 private struct NewWindowCommands: Commands {
-    @FocusedValue(\.browserFolderURL) private var browserFolderURL
+    @FocusedValue(\.browserFolderItem) private var browserFolderItem
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") {
-                WindowLaunchCoordinator.openNewWindow(cloning: browserFolderURL)
+                if let browserFolderItem {
+                    WindowLaunchCoordinator.openNewWindow(cloning: browserFolderItem)
+                } else {
+                    WindowLaunchCoordinator.openNewWindow()
+                }
             }
             .keyboardShortcut("n", modifiers: .command)
         }
     }
 }
 
+private struct QuickLookCommand: View {
+    @FocusedValue(\.activeBrowserTab) private var tab
+
+    var body: some View {
+        Button("Quick Look") {
+            // Routed to the focused pane so split view previews the right folder.
+            tab?.focusedPane.sendChrome(.quickLook)
+        }
+        .keyboardShortcut("y", modifiers: .command)
+        .disabled(tab?.focusedPane.navigation.current.localURL == nil)
+        .help("Preview the selected items (Space)")
+    }
+}
+
+private struct GoMenuCommands: View {
+    @FocusedValue(\.activeBrowserTab) private var tab
+
+    var body: some View {
+        Button("Go to Folder…") {
+            tab?.focusedPane.sendChrome(.goToFolder)
+        }
+        .keyboardShortcut("g", modifiers: [.command, .shift])
+        .disabled(tab == nil)
+    }
+}
+
 private struct AgentCommands: View {
-    @FocusedValue(\.browserFolderURL) private var browserFolderURL
+    @FocusedValue(\.browserFolderItem) private var browserFolderItem
+
+    private var context: ExecutionContext? {
+        browserFolderItem.map { ExecutionContext(workingDirectory: $0) }
+    }
 
     var body: some View {
         Button("Run Agent Here…") {
-            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
-            AgentRunCoordinator.shared.presentRunAgent(folder: folder)
+            guard let context else { return }
+            AgentRunCoordinator.shared.presentRunAgent(context: context)
         }
         .keyboardShortcut("r", modifiers: [.command, .shift])
+        .disabled(context?.supportsLocalExecution != true)
 
         Button("Quick Run Agent") {
-            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
-            AgentRunCoordinator.shared.presentRunAgent(folder: folder, quickRun: true)
+            guard let context else { return }
+            AgentRunCoordinator.shared.presentRunAgent(context: context, quickRun: true)
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
+        .disabled(context?.supportsLocalExecution != true)
 
         Divider()
 
         Button("Open Folder in Cursor") {
-            let folder = browserFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
-            WorkspaceActions.openInCursor(at: folder)
+            guard let item = browserFolderItem else { return }
+            WorkspaceActions.openInCursor(at: item)
         }
+        .disabled(context?.supportsLocalExecution != true)
 
         Divider()
 
@@ -121,10 +168,13 @@ private struct SplitViewCommands: View {
     @FocusedValue(\.activeBrowserTab) private var tab
 
     var body: some View {
+        // ⌘⌥S instead of ⌘\: AppKit key equivalents follow the keyboard layout,
+        // and on layouts where `\` needs Option (Spanish, etc.) ⌘\ is unreachable.
+        // Letters are layout-safe.
         Button("Toggle Split View") {
             tab?.toggleSplit()
         }
-        .keyboardShortcut("\\", modifiers: .command)
+        .keyboardShortcut("s", modifiers: [.command, .option])
         .disabled(tab == nil)
 
         Button("Close Split View") {

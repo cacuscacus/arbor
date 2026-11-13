@@ -4,18 +4,18 @@ import UniformTypeIdentifiers
 
 struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
     let entries: [FileEntry]
-    @Binding var selection: Set<URL>
+    @Binding var selection: Set<ItemRef>
     @Binding var sortOrder: [KeyPathComparator<FileEntry>]
-    @Binding var renamingURL: URL?
+    @Binding var renamingItem: ItemRef?
     @Binding var renameDraft: String
     var settings: BrowserDisplaySettings
-    var relativeRoot: URL
+    var relativeRoot: ItemRef
     /// Drop destination for empty space / non-folder rows (pane's current folder).
-    var currentFolder: URL?
+    var currentFolder: ItemRef?
     var showsLocation: Bool
     var dragState: FileDragState
     var onOpenRow: (FileEntry) -> Void
-    var onTransfer: ([URL], URL, FileTransferOperation) -> Void
+    var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
@@ -28,9 +28,9 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
         Table(of: FileEntry.self, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Name", value: \.name) { entry in
                 HStack(spacing: 6) {
-                    FileIconImage(url: entry.id, size: 16)
+                    FileIconImage(item: entry.id, size: 16)
 
-                    if renamingURL == entry.id {
+                    if renamingItem == entry.id {
                         RenameTextField(
                             text: $renameDraft,
                             isDirectory: entry.isDirectory && !entry.isPackage,
@@ -126,7 +126,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .help(entry.id.deletingLastPathComponent().path)
+                        .help(entry.id.parent?.path ?? entry.id.path)
                         .opacity(entry.listingOpacity)
                 }
                 .width(min: 120, ideal: 200)
@@ -174,19 +174,20 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
 struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     let entries: [FileEntry]
-    @Binding var selection: Set<URL>
-    @Binding var renamingURL: URL?
+    @Binding var selection: Set<ItemRef>
+    @Binding var renamingItem: ItemRef?
     @Binding var renameDraft: String
     var iconMetrics: IconViewMetrics
     /// Drop destination for empty canvas / non-folder icons (pane's current folder).
-    var currentFolder: URL?
+    var currentFolder: ItemRef?
     var dragState: FileDragState
     var onOpen: (FileEntry) -> Void
-    var onTransfer: ([URL], URL, FileTransferOperation) -> Void
+    var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
     var onDeleteSelection: (() -> Void)? = nil
+    var onQuickLook: (() -> Void)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
 
@@ -195,7 +196,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
         IconCollectionView(
             entries: entries,
             selection: $selection,
-            renamingURL: $renamingURL,
+            renamingItem: $renamingItem,
             renameDraft: $renameDraft,
             iconMetrics: iconMetrics,
             currentFolder: currentFolder,
@@ -206,6 +207,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
             onCommitRename: onCommitRename,
             onCancelRename: onCancelRename,
             onDeleteSelection: onDeleteSelection,
+            onQuickLook: onQuickLook,
             contextMenu: contextMenu,
             emptySpaceMenu: emptySpaceMenu
         )
@@ -222,7 +224,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
 // MARK: - Shared UI pieces
 
 struct FileIconImage: View {
-    let url: URL
+    let item: ItemRef
     let size: CGFloat
     @State private var image: NSImage?
 
@@ -241,11 +243,11 @@ struct FileIconImage: View {
             }
         }
         .frame(width: size, height: size)
-        .task(id: "\(url.path)|\(Int(size))") {
-            if let cached = FileIcon.cached(for: url, size: size) {
+        .task(id: "\(item.volumeID.rawValue)|\(item.path)|\(Int(size))") {
+            if let cached = FileIcon.cached(for: item, size: size) {
                 image = cached
             }
-            FileIcon.load(for: url, size: size) { display in
+            FileIcon.load(for: item, size: size) { display in
                 image = display.image
             }
         }
@@ -256,13 +258,16 @@ struct FileIconImage: View {
 
 private func fileDragItemProvider(
     for entry: FileEntry,
-    selection: Binding<Set<URL>>,
+    selection: Binding<Set<ItemRef>>,
     dragState: FileDragState
 ) -> NSItemProvider {
     if !selection.wrappedValue.contains(entry.id) {
         selection.wrappedValue = [entry.id]
     }
-    let urls = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
+    let items = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
+    let urls = items.compactMap {
+        FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
+    }
     if urls.count == 1, let url = urls.first {
         return NSItemProvider(contentsOf: url) ?? NSItemProvider()
     }
@@ -276,7 +281,7 @@ private func fileDragItemProvider(
 extension View {
     fileprivate func draggableFile(
         entry: FileEntry,
-        selection: Binding<Set<URL>>,
+        selection: Binding<Set<ItemRef>>,
         dragState: FileDragState
     ) -> some View {
         onDrag {
@@ -288,7 +293,7 @@ extension View {
     fileprivate func dropFolderTarget(
         entry: FileEntry,
         dragState: FileDragState,
-        onTransfer: @escaping ([URL], URL, FileTransferOperation) -> Void,
+        onTransfer: @escaping ([ItemRef], ItemRef, FileTransferOperation) -> Void,
         isTargeted: Binding<Bool>? = nil
     ) -> some View {
         if entry.isBrowsable {
@@ -309,9 +314,9 @@ extension View {
     /// Accept drops into the open folder (empty space / non-folder chrome).
     @ViewBuilder
     fileprivate func dropIntoCurrentFolder(
-        _ folder: URL?,
+        _ folder: ItemRef?,
         dragState: FileDragState,
-        onTransfer: @escaping ([URL], URL, FileTransferOperation) -> Void
+        onTransfer: @escaping ([ItemRef], ItemRef, FileTransferOperation) -> Void
     ) -> some View {
         if let folder {
             self.onDrop(

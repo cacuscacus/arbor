@@ -36,6 +36,9 @@ echo "==> Packaging Arbor ${VERSION} (${ARCH_LABEL})"
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
+echo "==> Building SFTP helper"
+cargo build --manifest-path "$ROOT/Cargo.toml" --release -p arbor-sftp-helper
+
 # Ad-hoc sign for distribution without an Apple Developer Program membership.
 xcodebuild \
   -project "$PROJECT" \
@@ -52,6 +55,10 @@ if [[ ! -d "$APP_SRC" ]]; then
   echo "Build succeeded but Arbor.app not found at $APP_SRC" >&2
   exit 1
 fi
+
+mkdir -p "$APP_SRC/Contents/Helpers"
+cp "$ROOT/target/release/arbor-sftp-helper" "$APP_SRC/Contents/Helpers/arbor-sftp-helper"
+chmod 755 "$APP_SRC/Contents/Helpers/arbor-sftp-helper"
 
 # Re-sign ad-hoc after copy into a clean staging tree (strip extended attrs that confuse Gatekeeper/zip).
 STAGE="$DIST/stage"

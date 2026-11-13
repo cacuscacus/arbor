@@ -52,3 +52,6 @@ plugins/**/target/
 
 # Release packaging output
 /dist/
+
+# Local manual-test fixture
+/test_file_structure/

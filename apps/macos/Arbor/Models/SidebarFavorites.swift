@@ -4,31 +4,26 @@ import SwiftUI
 
 struct FavoriteItem: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
-    var path: String
+    var itemRef: ItemRef
     /// Optional custom label (e.g. "Home"). `nil` uses the folder name.
     var title: String?
 
-    init(id: UUID = UUID(), path: String, title: String? = nil) {
+    init(id: UUID = UUID(), itemRef: ItemRef, title: String? = nil) {
         self.id = id
-        self.path = path
+        self.itemRef = itemRef
         self.title = title
     }
 
     init(url: URL, title: String? = nil) {
-        self.init(path: url.standardizedFileURL.path, title: title)
-    }
-
-    var url: URL {
-        URL(fileURLWithPath: path).standardizedFileURL
+        self.init(itemRef: LocalFileLocation.item(for: url), title: title)
     }
 
     var displayName: String {
         if let title, !title.isEmpty { return title }
-        let name = url.lastPathComponent
-        if name.isEmpty || name == "/" {
-            return url.path
+        if itemRef.name.isEmpty || itemRef.path == "/" {
+            return itemRef.path
         }
-        return name
+        return itemRef.name
     }
 
     var systemImage: String {
@@ -39,6 +34,32 @@ struct FavoriteItem: Identifiable, Codable, Equatable, Hashable {
         case "Downloads": return "arrow.down.circle"
         default: return "folder"
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case itemRef
+        case path
+        case title
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        if let item = try container.decodeIfPresent(ItemRef.self, forKey: .itemRef) {
+            itemRef = item
+        } else {
+            let path = try container.decode(String.self, forKey: .path)
+            itemRef = LocalFileLocation.item(for: URL(fileURLWithPath: path))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(itemRef, forKey: .itemRef)
+        try container.encodeIfPresent(title, forKey: .title)
     }
 }
 
@@ -67,19 +88,35 @@ final class SidebarFavoritesStore {
         insert(urls: urls, at: items.count)
     }
 
+    @discardableResult
+    func add(items itemRefs: [ItemRef]) -> Int {
+        insert(items: itemRefs, at: items.count)
+    }
+
     /// Inserts folders at `index` (e.g. drop position). Skips non-folders and duplicates.
     @discardableResult
     func insert(urls: [URL], at index: Int) -> Int {
+        insert(items: urls.map(LocalFileLocation.item(for:)), at: index)
+    }
+
+    /// Provider-neutral insertion. Local entries are validated as directories;
+    /// remote providers validate roots when their connection UI is added in 6b.
+    @discardableResult
+    func insert(items itemRefs: [ItemRef], at index: Int) -> Int {
         var added: [FavoriteItem] = []
-        let existing = Set(items.map { $0.url.path })
+        let existing = Set(items.map(\.itemRef))
         var seen = existing
 
-        for url in urls {
-            let standardized = url.standardizedFileURL
-            guard isDirectory(standardized) else { continue }
-            guard !seen.contains(standardized.path) else { continue }
-            seen.insert(standardized.path)
-            added.append(FavoriteItem(url: standardized, title: defaultTitle(for: standardized)))
+        for item in itemRefs {
+            if let url = item.localURL {
+                guard isDirectory(url) else { continue }
+            }
+            guard !seen.contains(item) else { continue }
+            seen.insert(item)
+            added.append(FavoriteItem(
+                itemRef: item,
+                title: item.localURL.flatMap(defaultTitle(for:))
+            ))
         }
 
         guard !added.isEmpty else { return 0 }
@@ -120,8 +157,11 @@ final class SidebarFavoritesStore {
     }
 
     func contains(_ url: URL) -> Bool {
-        let path = url.standardizedFileURL.path
-        return items.contains { $0.url.path == path }
+        contains(LocalFileLocation.item(for: url))
+    }
+
+    func contains(_ item: ItemRef) -> Bool {
+        items.contains { $0.itemRef == item }
     }
 
     private func persist() {

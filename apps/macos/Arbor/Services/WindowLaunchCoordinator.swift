@@ -8,8 +8,8 @@ import SwiftUI
 /// key windows by folder URL when the user wants two windows on the same path.
 @MainActor
 enum WindowLaunchCoordinator {
-    private static var pendingRoots: [URL] = []
-    private static var openBrowserWindow: ((URL) -> Void)?
+    private static var pendingRoots: [ItemRef] = []
+    private static var openBrowserWindow: ((ItemRef) -> Void)?
     private static var openBareBrowserWindow: (() -> Void)?
     private static var lastOpenAt: Date?
     /// How many newly opened windows should be pinned to the active Space.
@@ -18,21 +18,29 @@ enum WindowLaunchCoordinator {
     private static var activeSpacePinAfterWindowNumber = 0
 
     /// Last focused browser folder — used by Dock menu when SwiftUI focus is unavailable.
-    private(set) static var lastFocusedFolder: URL?
+    private(set) static var lastFocusedItem: ItemRef?
 
     static func noteFocusedFolder(_ url: URL) {
-        lastFocusedFolder = url.standardizedFileURL
+        lastFocusedItem = LocalFileLocation.item(for: url)
+    }
+
+    static func noteFocusedItem(_ item: ItemRef) {
+        lastFocusedItem = item
+    }
+
+    static func enqueueRoot(_ item: ItemRef) {
+        pendingRoots.append(item)
     }
 
     static func enqueueRoot(_ url: URL) {
-        pendingRoots.append(url.standardizedFileURL)
+        enqueueRoot(LocalFileLocation.item(for: url))
     }
 
-    static func dequeueRoot(
-        fallback: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> URL {
+    static func dequeueRoot(fallback: ItemRef? = nil) -> ItemRef {
         if pendingRoots.isEmpty {
-            return fallback.standardizedFileURL
+            return fallback ?? LocalFileLocation.item(
+                for: FileManager.default.homeDirectoryForCurrentUser
+            )
         }
         return pendingRoots.removeFirst()
     }
@@ -54,6 +62,13 @@ enum WindowLaunchCoordinator {
     ///   window to the desktop the user is on, even if Arbor already has a window
     ///   on another virtual desktop.
     static func openNewWindow(cloning folder: URL? = nil, onActiveSpace: Bool = false) {
+        let item = folder.map(LocalFileLocation.item(for:))
+            ?? lastFocusedItem
+            ?? LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser)
+        openNewWindow(cloning: item, onActiveSpace: onActiveSpace)
+    }
+
+    static func openNewWindow(cloning item: ItemRef, onActiveSpace: Bool = false) {
         // Guard against reopen + WindowGroup both firing in the same gesture.
         let now = Date()
         if let lastOpenAt, now.timeIntervalSince(lastOpenAt) < 0.45 {
@@ -61,13 +76,11 @@ enum WindowLaunchCoordinator {
         }
         lastOpenAt = now
 
-        let root = (folder ?? lastFocusedFolder ?? FileManager.default.homeDirectoryForCurrentUser)
-            .standardizedFileURL
         if onActiveSpace {
             pendingActiveSpacePins += 1
             activeSpacePinAfterWindowNumber = NSApp.windows.map(\.windowNumber).max() ?? 0
         }
-        openBrowserWindow?(root)
+        openBrowserWindow?(item)
         if onActiveSpace {
             schedulePinNewestToActiveSpace()
         }

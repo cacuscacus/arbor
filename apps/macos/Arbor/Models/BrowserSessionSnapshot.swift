@@ -6,7 +6,7 @@ struct BrowserSessionSnapshot: Codable, Equatable, Sendable {
     var version: Int
     var windows: [BrowserWindowSnapshot]
 
-    init(version: Int = 1, windows: [BrowserWindowSnapshot]) {
+    init(version: Int = 2, windows: [BrowserWindowSnapshot]) {
         self.version = version
         self.windows = windows
     }
@@ -25,13 +25,52 @@ struct BrowserWindowSnapshot: Codable, Equatable, Sendable {
 }
 
 struct BrowserTabSnapshot: Codable, Equatable, Sendable {
-    /// Folder paths for panes (primary, optional secondary for split).
-    var panePaths: [String]
+    /// Provider-neutral pane roots (primary, optional secondary for split).
+    var paneItems: [ItemRef]
     var focusedPaneIndex: Int
 
-    init(panePaths: [String], focusedPaneIndex: Int = 0) {
-        self.panePaths = panePaths
+    init(paneItems: [ItemRef], focusedPaneIndex: Int = 0) {
+        self.paneItems = paneItems
         self.focusedPaneIndex = focusedPaneIndex
+    }
+
+    /// Compatibility initializer used by old fixtures and v1 path snapshots.
+    init(panePaths: [String], focusedPaneIndex: Int = 0) {
+        self.init(
+            paneItems: panePaths.map {
+                LocalFileLocation.item(for: URL(fileURLWithPath: $0))
+            },
+            focusedPaneIndex: focusedPaneIndex
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case paneItems
+        case panePaths
+        case focusedPaneIndex
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        focusedPaneIndex = try container.decodeIfPresent(
+            Int.self,
+            forKey: .focusedPaneIndex
+        ) ?? 0
+
+        if let items = try container.decodeIfPresent([ItemRef].self, forKey: .paneItems) {
+            paneItems = items
+            return
+        }
+        let paths = try container.decodeIfPresent([String].self, forKey: .panePaths) ?? []
+        paneItems = paths.map {
+            LocalFileLocation.item(for: URL(fileURLWithPath: $0))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(paneItems, forKey: .paneItems)
+        try container.encode(focusedPaneIndex, forKey: .focusedPaneIndex)
     }
 }
 
@@ -125,12 +164,43 @@ extension BrowserSessionSnapshot {
         assert(ok, "BrowserSessionSnapshot JSON round-trip failed")
         return ok
     }
+
+    /// v1 stored only local `panePaths`; v2 decodes them into local ItemRefs.
+    @discardableResult
+    static func assertLegacyPathMigration() -> Bool {
+        let legacy = """
+        {
+          "version": 1,
+          "windows": [{
+            "selectedTabIndex": 0,
+            "tabs": [{
+              "focusedPaneIndex": 0,
+              "panePaths": ["/tmp"]
+            }]
+          }]
+        }
+        """
+        do {
+            let decoded = try from(jsonData: Data(legacy.utf8))
+            guard let item = decoded.windows.first?.tabs.first?.paneItems.first else {
+                assertionFailure("Legacy session did not produce a pane item")
+                return false
+            }
+            let ok = item.path == "/tmp" && item.localURL?.path == "/tmp"
+            assert(ok, "Legacy panePaths migration produced the wrong ItemRef")
+            return ok
+        } catch {
+            assertionFailure("Legacy session migration failed: \(error)")
+            return false
+        }
+    }
 }
 
 #if DEBUG
 extension BrowserSessionSnapshot {
     static func runSelfCheck() {
         _ = assertRoundTrip()
+        _ = assertLegacyPathMigration()
     }
 }
 #endif

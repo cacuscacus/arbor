@@ -10,10 +10,12 @@ struct SidebarView: View {
     @Bindable var navigation: BrowserNavigation
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
-    var onOpenInSplit: ((URL) -> Void)? = nil
+    var onOpenInSplit: ((ItemRef) -> Void)? = nil
 
     @State private var draggingFavoriteID: UUID?
     @State private var dropTargetIndex: Int?
+    @State private var sshLocations = SSHLocationStore.shared
+    @State private var showingSSHLocationSheet = false
     @Namespace private var favoritesNamespace
 
     private let listSpring = Animation.spring(response: 0.34, dampingFraction: 0.84)
@@ -35,9 +37,12 @@ struct SidebarView: View {
                         delegate: makeDropDelegate(insertIndex: favorites.items.count)
                     )
 
-                sectionHeader("Places")
+                placesHeader
                     .padding(.top, 12)
 
+                ForEach(sshLocations.locations) { profile in
+                    sshLocationRow(profile)
+                }
                 placesRow("Recents", systemImage: "clock")
                 placesRow("Volumes", systemImage: "externaldrive")
                 placesRow("Git Repositories", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -49,6 +54,11 @@ struct SidebarView: View {
         .scrollIndicators(.never)
         .scrollContentBackground(.hidden)
         .focusEffectDisabled()
+        .sheet(isPresented: $showingSSHLocationSheet) {
+            SSHLocationSheet(store: sshLocations) { root in
+                navigation.go(to: root)
+            }
+        }
         .background {
             DragSessionEndedCleaner {
                 // Delay past DropDelegate.performDrop so insert index / urls
@@ -71,13 +81,13 @@ struct SidebarView: View {
                 animation: listSpring
             )
         )
-        .onChange(of: dragState.urls) { _, urls in
-            if !urls.isEmpty, dropTargetIndex == nil, draggingFavoriteID == nil {
+        .onChange(of: dragState.items) { _, items in
+            if !items.isEmpty, dropTargetIndex == nil, draggingFavoriteID == nil {
                 withAnimation(interactiveSpring) {
                     dropTargetIndex = favorites.items.count
                 }
             }
-            if urls.isEmpty, draggingFavoriteID == nil {
+            if items.isEmpty, draggingFavoriteID == nil {
                 withAnimation(listSpring) {
                     dropTargetIndex = nil
                 }
@@ -167,15 +177,18 @@ struct SidebarView: View {
 
     private var pendingAddURLs: [URL] {
         guard draggingFavoriteID == nil else { return [] }
-        let existing = Set(favorites.items.map(\.url.path))
-        return dragState.urls
-            .map(\.standardizedFileURL)
+        let existing = Set(favorites.items.map(\.itemRef))
+        return dragState.items
+            .filter { !existing.contains($0) }
+            .compactMap {
+                FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
+            }
             .filter { url in
                 var isDir: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
                       isDir.boolValue
                 else { return false }
-                return !existing.contains(url.path)
+                return true
             }
     }
 
@@ -189,11 +202,77 @@ struct SidebarView: View {
             .textCase(.uppercase)
     }
 
+    private var placesHeader: some View {
+        HStack {
+            Text("Places")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Spacer()
+            Button {
+                showingSSHLocationSheet = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("Add SSH Location…")
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+    }
+
+    private func sshLocationRow(_ profile: SSHLocationProfile) -> some View {
+        let isCurrent = profile.root == navigation.current
+        return Button {
+            navigation.go(to: profile.root)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "network")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(profile.displayName)
+                        .lineLimit(1)
+                    Text(profile.endpoint.displayDestination)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isCurrent ? Color.primary.opacity(0.08) : Color.clear)
+        }
+        .contextMenu {
+            Button("Open in New Window") {
+                WindowLaunchCoordinator.openNewWindow(cloning: profile.root)
+            }
+            if let onOpenInSplit {
+                Button("Open in Split") {
+                    onOpenInSplit(profile.root)
+                }
+            }
+            Divider()
+            Button("Remove SSH Location", role: .destructive) {
+                sshLocations.remove(id: profile.id)
+            }
+        }
+    }
+
     private func favoriteRow(_ item: FavoriteItem, dropIndex: Int, isLifted: Bool) -> some View {
-        let isCurrent = item.url == navigation.current.standardizedFileURL
+        let isCurrent = item.itemRef == navigation.current
 
         return Button {
-            navigation.go(to: item.url)
+            navigation.go(to: item.itemRef)
         } label: {
             Label(item.displayName, systemImage: item.systemImage)
                 .lineLimit(1)
@@ -222,18 +301,22 @@ struct SidebarView: View {
         )
         .contextMenu {
             Button("Open in New Window") {
-                WindowLaunchCoordinator.openNewWindow(cloning: item.url)
+                WindowLaunchCoordinator.openNewWindow(cloning: item.itemRef)
             }
             if let onOpenInSplit {
                 Button("Open in Split") {
-                    onOpenInSplit(item.url)
+                    onOpenInSplit(item.itemRef)
                 }
             }
-            Button("Run Agent Here…") {
-                AgentRunCoordinator.shared.presentRunAgent(folder: item.url)
-            }
-            Button("Open in Cursor") {
-                WorkspaceActions.openInCursor(at: item.url)
+            if FileProviderRegistry.shared.intrinsicLocalURL(for: item.itemRef) != nil {
+                Button("Run Agent Here…") {
+                    AgentRunCoordinator.shared.presentRunAgent(
+                        context: ExecutionContext(workingDirectory: item.itemRef)
+                    )
+                }
+                Button("Open in Cursor") {
+                    WorkspaceActions.openInCursor(at: item.itemRef)
+                }
             }
             Button("Remove from Favorites", role: .destructive) {
                 withAnimation(listSpring) {
@@ -317,7 +400,7 @@ private struct SidebarDropDelegate: DropDelegate {
         withAnimation(animation) {
             dropTargetIndex = index
         }
-        if !dragState.urls.isEmpty || info.hasItemsConforming(to: [.fileURL]),
+        if !dragState.items.isEmpty || info.hasItemsConforming(to: [.fileURL]),
            draggingFavoriteID == nil
         {
             return DropProposal(operation: .copy)
@@ -328,7 +411,7 @@ private struct SidebarDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         // Capture before any cleaner / async work can wipe state.
         let favoriteID = draggingFavoriteID
-        let fileURLs = dragState.urls
+        let fileItems = dragState.items
         let committedIndex = dropTargetIndex ?? index
 
         withAnimation(animation) {
@@ -336,10 +419,10 @@ private struct SidebarDropDelegate: DropDelegate {
             draggingFavoriteID = nil
         }
 
-        if !fileURLs.isEmpty {
+        if !fileItems.isEmpty {
             dragState.clear()
             withAnimation(animation) {
-                _ = favorites.insert(urls: fileURLs, at: committedIndex)
+                _ = favorites.insert(items: fileItems, at: committedIndex)
             }
             return true
         }
@@ -412,7 +495,7 @@ private struct SidebarSectionFileDropDelegate: DropDelegate {
     let animation: Animation
 
     func validateDrop(info: DropInfo) -> Bool {
-        !dragState.urls.isEmpty || info.hasItemsConforming(to: [.fileURL])
+        !dragState.items.isEmpty || info.hasItemsConforming(to: [.fileURL])
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -422,12 +505,12 @@ private struct SidebarSectionFileDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         // Honor the live preview index — previously this always appended.
         let committedIndex = dropTargetIndex ?? favorites.items.count
-        let urls = dragState.urls
+        let items = dragState.items
         dragState.clear()
 
-        if !urls.isEmpty {
+        if !items.isEmpty {
             withAnimation(animation) {
-                _ = favorites.insert(urls: urls, at: committedIndex)
+                _ = favorites.insert(items: items, at: committedIndex)
             }
             withAnimation(animation) { dropTargetIndex = nil }
             return true

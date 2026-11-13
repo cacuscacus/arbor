@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct RunAgentSheet: View {
-    let folder: URL
-    var selection: [URL] = []
+    let context: ExecutionContext
 
     @Bindable private var tools = AgentToolsStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -20,7 +19,10 @@ struct RunAgentSheet: View {
     }
 
     private var expandedPreview: String {
-        guard let selectedPreset else { return "" }
+        guard let selectedPreset,
+              let folder = context.intrinsicLocalDirectoryURL,
+              let selection = context.intrinsicLocalSelectionURLs
+        else { return "" }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let template = trimmed.isEmpty ? selectedPreset.quickRunTemplate : selectedPreset.promptTemplate
         return AgentCommandExpander.expand(
@@ -37,17 +39,17 @@ struct RunAgentSheet: View {
                 .font(.title2.weight(.semibold))
 
             LabeledContent("Folder") {
-                Text(folder.path)
+                Text(context.workingDirectory.path)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                    .help(folder.path)
+                    .help(context.workingDirectory.path)
             }
 
-            if !selection.isEmpty {
+            if !context.selection.isEmpty {
                 LabeledContent("Selection") {
-                    Text("\(selection.count) item\(selection.count == 1 ? "" : "s")")
+                    Text("\(context.selection.count) item\(context.selection.count == 1 ? "" : "s")")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -135,9 +137,8 @@ struct RunAgentSheet: View {
         tools.defaultPresetID = selectedPreset.id
         AgentLauncher.launch(
             preset: selectedPreset,
-            folder: folder,
             prompt: prompt,
-            selection: selection
+            context: context
         )
         dismiss()
     }

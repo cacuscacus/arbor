@@ -31,7 +31,8 @@ struct ContentView: View {
             return
         }
 
-        let root = rootDirectory ?? WindowLaunchCoordinator.dequeueRoot()
+        let root = rootDirectory.map(LocalFileLocation.item(for:))
+            ?? WindowLaunchCoordinator.dequeueRoot()
         let tab = BrowserTab(root: root)
         _tabs = State(initialValue: [tab])
         _selectedTabID = State(initialValue: tab.id)
@@ -45,7 +46,9 @@ struct ContentView: View {
     /// Paths + focus + selection — drives debounced session persistence.
     private var sessionFingerprint: String {
         let tabPart = tabs.map { tab in
-            let paths = tab.panes.map { $0.navigation.current.path }.joined(separator: "\u{1e}")
+            let paths = tab.panes.map {
+                "\($0.navigation.current.volumeID.rawValue):\($0.navigation.current.path)"
+            }.joined(separator: "\u{1e}")
             let focus = tab.panes.firstIndex(where: { $0.id == tab.focusedPaneID }) ?? 0
             return "\(paths)\u{1f}\(focus)"
         }.joined(separator: "\u{1d}")
@@ -53,10 +56,12 @@ struct ContentView: View {
         return "\(tabPart)\u{1c}\(selectedIndex)"
     }
 
-    /// Focused browser pane folder (fallback Home) — drives the embedded shell cwd.
-    private var focusedFolderURL: URL {
-        selectedTab?.navigation.current
-            ?? FileManager.default.homeDirectoryForCurrentUser
+    /// Focused provider-neutral context. Unsupported remotes never fall back to Home.
+    private var focusedExecutionContext: ExecutionContext {
+        ExecutionContext(
+            workingDirectory: selectedTab?.navigation.current
+                ?? LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser)
+        )
     }
 
     var body: some View {
@@ -65,7 +70,7 @@ struct ContentView: View {
                 VSplitView {
                     browserSplit
                     TerminalPaneView(
-                        cwd: focusedFolderURL,
+                        context: focusedExecutionContext,
                         followCwd: $followCwd,
                         restartToken: $terminalRestartToken
                     )
@@ -92,8 +97,7 @@ struct ContentView: View {
         }
         .sheet(item: $agentRun.request) { request in
             RunAgentSheet(
-                folder: request.folder,
-                selection: request.selection
+                context: request.context
             )
         }
         .alert(
@@ -228,7 +232,7 @@ struct ContentView: View {
 
     private func openNewTab() {
         let root = selectedTab?.navigation.current
-            ?? FileManager.default.homeDirectoryForCurrentUser
+            ?? LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser)
         let tab = BrowserTab(root: root)
         tabs.append(tab)
         selectedTabID = tab.id
@@ -257,7 +261,7 @@ struct ContentView: View {
         let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID }) ?? 0
         let tabSnaps = tabs.map { tab in
             BrowserTabSnapshot(
-                panePaths: tab.panes.map { $0.navigation.current.path },
+                paneItems: tab.panes.map(\.navigation.current),
                 focusedPaneIndex: tab.panes.firstIndex(where: { $0.id == tab.focusedPaneID }) ?? 0
             )
         }
