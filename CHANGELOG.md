@@ -11,9 +11,11 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-11-13
+
 ### Added
 
-- **Open Terminal Here** in the folder, empty-space, and sidebar context menus, placed above **Run Agent Here…**
+- **Open Terminal Here** in the folder, empty-space, and sidebar context menus, placed above **Run Agent Here…**; it replaces the previous **New Terminal Here** label
 
 ## [1.6.0] — 2026-11-13
 
@@ -206,7 +208,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.1
 [1.6.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.0
 [1.5.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.5.0
 [1.4.9]: https://github.com/cacuscacus/arbor/releases/tag/v1.4.9
