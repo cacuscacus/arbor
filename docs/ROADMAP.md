@@ -223,7 +223,7 @@ Analysis (2026-08-15): [`REMOTE-SSH.md`](REMOTE-SSH.md). Intent: sidebar **SSH l
 | Sub-phase | Goal | Status |
 |-----------|------|--------|
 | **6a** Provider abstraction | `ItemRef` / Location / Volume / Connection; `LocalFileProvider`; migrate listing, mutations, undo, favorites, sessions | ✓ complete — provider-neutral browser/actions/execution requests, async provider-routed undo, materialization boundary and capability gating |
-| **6b** SSH MVP | Connect UI, host keys, SFTP browse + basic mutations, reconnectable favorites/sessions, poll refresh | ◐ in progress — first usable key/agent-auth slice implemented; interactive/Keychain auth remains |
+| **6b** SSH MVP | Connect UI, host keys, SFTP browse + basic mutations, reconnectable favorites/sessions, poll refresh | ✓ complete — key/agent/password/passphrase auth (askpass bridge + Keychain), new-host trust and changed-key rotation flows, recursive delete, identity-file profiles, 5 s poll refresh |
 | **6c** Cross-location transfers | Job engine, local↔remote DnD, custom UTType, optional rsync-over-SSH, safe move = copy+verify+delete | ⬚ planned |
 | **6d** Remote terminal & agents | `ExecutionContext.remote`, `ssh -tt`, follow-folder per connection, clear host labels | ⬚ planned |
 | **6e** Search / preview polish | Remote `fd`/`find`, thumbnail materialization limits, capability-aware Get Info / Open | ⬚ planned |

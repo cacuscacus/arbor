@@ -84,6 +84,7 @@ enum FileProviderError: LocalizedError, Sendable {
     case connectionRequired(ConnectionID)
     case authenticationRequired(ConnectionID)
     case hostKeyVerificationRequired(ConnectionID)
+    case hostKeyChangedRequired(ConnectionID)
     case connectionLost(ConnectionID, message: String)
     case operationFailed(item: ItemRef, message: String)
 
@@ -111,6 +112,8 @@ enum FileProviderError: LocalizedError, Sendable {
             return "SSH authentication is required for this location."
         case .hostKeyVerificationRequired:
             return "The SSH host key must be verified before connecting."
+        case .hostKeyChangedRequired:
+            return "The recorded SSH host key changed; review before replacing it."
         case .connectionLost(_, let message):
             return message
         case .operationFailed(_, let message):

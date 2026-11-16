@@ -66,6 +66,8 @@ private struct LocalFileBrowserView: View {
     @State private var errorMessage: String?
     @State private var connectionRequired: ConnectionID?
     @State private var hostKeyRequired: ConnectionID?
+    /// `hostKeyRequired` for a key that CHANGED (vs. a brand-new host).
+    @State private var hostKeyChangedMode = false
     @State private var authenticationRequired: ConnectionID?
     @State private var hostKeyCandidate: SSHHostKeyCandidate?
     @State private var isLoading = false
@@ -364,6 +366,7 @@ private struct LocalFileBrowserView: View {
             .sheet(item: $hostKeyCandidate) { candidate in
                 SSHHostKeyVerificationSheet(candidate: candidate) {
                     hostKeyRequired = nil
+                    hostKeyChangedMode = false
                     reload()
                 }
             }
@@ -582,17 +585,24 @@ private struct LocalFileBrowserView: View {
 
     private func hostKeyContent(connectionID: ConnectionID) -> some View {
         ContentUnavailableView {
-            Label("Verify SSH Host Key", systemImage: "lock.shield")
+            Label(
+                hostKeyChangedMode ? "SSH Host Key Changed" : "Verify SSH Host Key",
+                systemImage: "lock.shield"
+            )
         } description: {
             VStack(spacing: 4) {
-                Text("Arbor will not accept a new or changed host key silently.")
+                Text(
+                    hostKeyChangedMode
+                        ? "The recorded host key no longer matches. Review the new fingerprint and replace it explicitly."
+                        : "Arbor will not accept a new or changed host key silently."
+                )
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
                 }
             }
         } actions: {
-            Button("Inspect Host Key") {
+            Button(hostKeyChangedMode ? "Review Replacement" : "Inspect Host Key") {
                 inspectHostKey(connectionID: connectionID)
             }
             Button("Copy Remote Path") {
@@ -1142,6 +1152,7 @@ private struct LocalFileBrowserView: View {
                 errorMessage = nil
                 connectionRequired = nil
                 hostKeyRequired = nil
+                hostKeyChangedMode = false
                 authenticationRequired = nil
                 isLoading = false
                 pruneSelection(to: Set(entries.map(\.id)))
@@ -1162,18 +1173,27 @@ private struct LocalFileBrowserView: View {
                      FileProviderError.connectionLost(let connectionID, _):
                     connectionRequired = connectionID
                     hostKeyRequired = nil
+                    hostKeyChangedMode = false
                     authenticationRequired = nil
                 case FileProviderError.hostKeyVerificationRequired(let connectionID):
                     hostKeyRequired = connectionID
+                    hostKeyChangedMode = false
+                    connectionRequired = nil
+                    authenticationRequired = nil
+                case FileProviderError.hostKeyChangedRequired(let connectionID):
+                    hostKeyRequired = connectionID
+                    hostKeyChangedMode = true
                     connectionRequired = nil
                     authenticationRequired = nil
                 case FileProviderError.authenticationRequired(let connectionID):
                     authenticationRequired = connectionID
                     connectionRequired = nil
                     hostKeyRequired = nil
+                    hostKeyChangedMode = false
                 default:
                     connectionRequired = nil
                     hostKeyRequired = nil
+                    hostKeyChangedMode = false
                     authenticationRequired = nil
                 }
                 refreshVisibleEntries()
@@ -1439,9 +1459,14 @@ private struct LocalFileBrowserView: View {
 
     @discardableResult
     private func moveSelectionToTrash() -> KeyPress.Result {
-        guard capabilities.contains(.trash) else { return .ignored }
         let targets = visibleEntries.filter { selection.contains($0.id) }
         guard !targets.isEmpty else { return .ignored }
+        // Providers without Trash (e.g. SSH) permanently delete instead.
+        guard capabilities.contains(.trash) else {
+            guard capabilities.contains(.remove) else { return .ignored }
+            permanentDeleteTargets = targets
+            return .handled
+        }
         trashEntries(targets)
         return .handled
     }

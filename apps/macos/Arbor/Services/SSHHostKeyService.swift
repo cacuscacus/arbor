@@ -6,7 +6,10 @@ nonisolated struct SSHHostKeyCandidate: Identifiable, Sendable {
     let port: UInt16
     let knownHostsName: String
     let keyLines: String
+    /// Fingerprints offered by the server right now.
     let fingerprints: [String]
+    /// Fingerprints currently recorded in known_hosts (empty for new hosts).
+    let existingFingerprints: [String]
     let hasExistingEntry: Bool
 }
 
@@ -52,6 +55,7 @@ nonisolated enum SSHHostKeyService {
                 knownHostsName: knownHostsName,
                 keyLines: usableLines + "\n",
                 fingerprints: fingerprints,
+                existingFingerprints: Self.fingerprints(ofKnownHostsEntry: existing),
                 hasExistingEntry: !existing
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .isEmpty
@@ -59,13 +63,52 @@ nonisolated enum SSHHostKeyService {
         }.value
     }
 
+    /// Replace a changed host key: drop the recorded entry, then append the
+    /// verified one. Only called from the explicit "Replace" sheet action.
+    static func replace(_ candidate: SSHHostKeyCandidate) async throws {
+        try await Task.detached {
+            let removed = try run(
+                "/usr/bin/ssh-keygen",
+                arguments: ["-R", candidate.knownHostsName],
+                acceptFailure: true
+            )
+            _ = removed
+            try appendKeyLines(candidate.keyLines)
+        }.value
+    }
+
     static func trust(_ candidate: SSHHostKeyCandidate) async throws {
         try await Task.detached {
             guard !candidate.hasExistingEntry else {
                 throw SSHTransportError.hostKeyVerification(
-                    "An existing key is already recorded for this host. Resolve the changed key in ~/.ssh/known_hosts before reconnecting."
+                    "An existing key is already recorded for this host. Use Replace to rotate it explicitly."
                 )
             }
+            try appendKeyLines(candidate.keyLines)
+        }.value
+    }
+
+    /// Fingerprints of the recorded known_hosts entry (empty when none).
+    private static func fingerprints(ofKnownHostsEntry entry: String) -> [String] {
+        let lines = entry
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !lines.isEmpty else { return [] }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("arbor-hostkey-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            try Data(lines.joined(separator: "\n").utf8).write(to: url)
+            return try run("/usr/bin/ssh-keygen", arguments: ["-l", "-f", url.path])
+                .split(separator: "\n")
+                .map(String.init)
+        } catch {
+            return []
+        }
+    }
+
+    private static func appendKeyLines(_ keyLines: String) throws {
             let fileManager = FileManager.default
             let sshDirectory = fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent(".ssh", isDirectory: true)
@@ -91,8 +134,7 @@ nonisolated enum SSHHostKeyService {
             let handle = try FileHandle(forWritingTo: knownHosts)
             defer { try? handle.close() }
             try handle.seekToEnd()
-            try handle.write(contentsOf: Data(candidate.keyLines.utf8))
-        }.value
+            try handle.write(contentsOf: Data(keyLines.utf8))
     }
 
     private static func resolvedEndpoint(_ endpoint: SSHEndpoint) throws -> (

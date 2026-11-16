@@ -34,6 +34,8 @@ nonisolated private struct EmptyResponse: Decodable {}
 nonisolated enum SSHTransportError: LocalizedError, Sendable {
     case helperUnavailable
     case hostKeyVerification(String)
+    /// The recorded host key no longer matches: needs an explicit replace.
+    case hostKeyChanged(String)
     case authentication(String)
     case connection(String)
     case remote(code: String, message: String)
@@ -44,6 +46,7 @@ nonisolated enum SSHTransportError: LocalizedError, Sendable {
         case .helperUnavailable:
             return "The Arbor SFTP helper is not available."
         case .hostKeyVerification(let message),
+             .hostKeyChanged(let message),
              .authentication(let message),
              .connection(let message):
             return message
@@ -52,6 +55,36 @@ nonisolated enum SSHTransportError: LocalizedError, Sendable {
         case .invalidResponse:
             return "The SFTP helper returned an invalid response."
         }
+    }
+}
+
+/// Locates the SFTP helper binary (bundled in the app, or the cargo build
+/// tree during development). Shared by the transport (which spawns it) and
+/// the askpass service (which ssh re-invokes as $SSH_ASKPASS).
+nonisolated enum SSHHelperExecutable {
+    static func url() -> URL? {
+        let fileManager = FileManager.default
+        let bundled = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/arbor-sftp-helper")
+        if fileManager.isExecutableFile(atPath: bundled.path) {
+            return bundled
+        }
+
+        // Development fallback. #filePath is absolute in local Xcode builds.
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Services
+            .deletingLastPathComponent() // Arbor
+            .deletingLastPathComponent() // macos
+            .deletingLastPathComponent() // apps
+            .deletingLastPathComponent() // repository
+        for configuration in ["release", "debug"] {
+            let candidate = repository
+                .appendingPathComponent("target/\(configuration)/arbor-sftp-helper")
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
     }
 }
 
@@ -122,10 +155,14 @@ actor SSHTransportConnection {
         )
     }
 
-    func remove(path: String, isDirectory: Bool) throws {
+    func remove(path: String, isDirectory: Bool, recursive: Bool = false) throws {
         let _: EmptyResponse = try request(
             method: "remove",
-            parameters: ["path": path, "is_directory": isDirectory]
+            parameters: [
+                "path": path,
+                "is_directory": isDirectory,
+                "recursive": recursive,
+            ]
         )
     }
 
@@ -192,7 +229,7 @@ actor SSHTransportConnection {
         }
         close()
 
-        guard let executable = Self.helperExecutableURL() else {
+        guard let executable = SSHHelperExecutable.url() else {
             throw SSHTransportError.helperUnavailable
         }
         let process = Process()
@@ -201,6 +238,15 @@ actor SSHTransportConnection {
         let errorPipe = Pipe()
         process.executableURL = executable
         process.arguments = helperArguments
+        // Password / passphrase prompts are bridged back to the app via the
+        // OpenSSH askpass protocol; ssh inherits these from the helper.
+        // Merge with the current environment so SSH_AUTH_SOCK and friends
+        // (agent, config paths) keep working.
+        var helperEnvironment = ProcessInfo.processInfo.environment
+        for (key, value) in SSHAskpassService.shared.envForHelper() {
+            helperEnvironment[key] = value
+        }
+        process.environment = helperEnvironment
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
@@ -225,6 +271,9 @@ actor SSHTransportConnection {
             if let user, !user.isEmpty {
                 arguments += ["--user", user]
             }
+            if let identity = profile.identityFile, !identity.isEmpty {
+                arguments += ["--identity-file", identity]
+            }
             return arguments
         }
     }
@@ -236,7 +285,11 @@ actor SSHTransportConnection {
                 readBuffer.removeSubrange(...newline)
                 return Data(line)
             }
-            guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else {
+            // macOS 26: FileHandle.read(upToCount:) on a LIVE pipe waits for
+            // EOF instead of returning available data; availableData is the
+            // correct blocking-until-data-or-EOF primitive.
+            let chunk = handle.availableData
+            if chunk.isEmpty {
                 return readBuffer.isEmpty ? nil : readBuffer
             }
             readBuffer.append(chunk)
@@ -251,9 +304,14 @@ actor SSHTransportConnection {
             ? stderr!
             : fallback?.localizedDescription ?? "The SSH connection closed unexpectedly."
         let lower = message.lowercased()
+        if lower.contains("remote host identification has changed")
+            || lower.contains("host key verification failed")
+            && lower.contains("offending")
+        {
+            return .hostKeyChanged(message)
+        }
         if lower.contains("host key verification failed")
-            || lower.contains("no matching host key")
-            || lower.contains("remote host identification has changed") {
+            || lower.contains("no matching host key") {
             return .hostKeyVerification(message)
         }
         if lower.contains("permission denied") || lower.contains("authentication") {
@@ -262,28 +320,4 @@ actor SSHTransportConnection {
         return .connection(message)
     }
 
-    private static func helperExecutableURL() -> URL? {
-        let fileManager = FileManager.default
-        let bundled = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Helpers/arbor-sftp-helper")
-        if fileManager.isExecutableFile(atPath: bundled.path) {
-            return bundled
-        }
-
-        // Development fallback. #filePath is absolute in local Xcode builds.
-        let repository = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // Services
-            .deletingLastPathComponent() // Arbor
-            .deletingLastPathComponent() // macos
-            .deletingLastPathComponent() // apps
-            .deletingLastPathComponent() // repository
-        for configuration in ["debug", "release"] {
-            let candidate = repository
-                .appendingPathComponent("target/\(configuration)/arbor-sftp-helper")
-            if fileManager.isExecutableFile(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return nil
-    }
 }

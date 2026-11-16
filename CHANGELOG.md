@@ -11,6 +11,20 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive SSH auth**: passwords and key passphrases prompt a secure in-app sheet via an OpenSSH askpass bridge; secrets can be **remembered in the Keychain** and are then answered automatically (entries are only readable by Arbor)
+- **Per-profile identity file** (`identityFile`, like `ssh -i`) with `IdentitiesOnly`, configurable in the SSH location JSON
+- **Host-key rotation flow**: when a recorded host key changes, the verification sheet now shows recorded vs. offered fingerprints with an explicit **Replace and Connect** action (`ssh-keygen -R` + re-trust), instead of a dead end
+- **Recursive delete for SSH locations**: folders delete bottom-up over SFTP; the Delete key routes to the permanent-delete confirmation when a provider has no Trash
+
+### Fixed
+
+- **SSH transport hang on macOS 26**: `FileHandle.read(upToCount:)` never returns on a live pipe (even `/bin/cat` hangs); the transport and askpass bridge now use `availableData`. SSH connections never completed before this
+- The SFTP helper replaced the `openssh` crate (which hardcodes `BatchMode=yes`) with a direct `ssh -s <host> sftp` spawn, so interactive auth works and stderr diagnostics still reach the app's error classification
+- Helper environment now inherits the full app environment (agent socket included) instead of replacing it
+- Repeated SSH retries no longer deadlock askpass prompts behind one another (per-connection threads + queued prompt presentation)
+
 ### Fixed
 
 - Quick Look: panel data source no longer routes through `MainActor.assumeIsolated` (lock-protected storage instead), the arrow-key sync matches by URL so mixed/remote listings select the right row, and the index-change callback is released when the panel closes

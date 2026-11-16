@@ -112,7 +112,6 @@ dependencies = [
  "anyhow",
  "base64",
  "futures-util",
- "openssh",
  "openssh-sftp-client",
  "serde",
  "serde_json",
@@ -610,20 +609,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "openssh"
-version = "0.11.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d534c4bfecb0ed71dea4db444a5922a294d15cf40e700548f27295e1feb0ef18"
-dependencies = [
- "libc",
- "once_cell",
- "shell-escape",
- "tempfile",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "openssh-sftp-client"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -633,7 +618,6 @@ dependencies = [
  "derive_destructure2",
  "futures-core",
  "once_cell",
- "openssh",
  "openssh-sftp-client-lowlevel",
  "openssh-sftp-error",
  "pin-project",
@@ -667,7 +651,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12a702f18f0595b4578b21fd120ae7aa45f4298a8b28ddcb2397ace6f5a8251a"
 dependencies = [
  "awaitable-error",
- "openssh",
  "openssh-sftp-protocol-error",
  "ssh_format_error",
  "thiserror",
@@ -919,12 +902,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shell-escape"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45bb67a18fa91266cc7807181f62f9178a6873bfad7dc788c42e6430db40184f"
-
-[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,16 +922,6 @@ name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
-
-[[package]]
-name = "socket2"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
-dependencies = [
- "libc",
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "ssh_format"
@@ -1066,7 +1033,6 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]

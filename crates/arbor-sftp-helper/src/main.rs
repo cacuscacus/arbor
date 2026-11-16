@@ -1,30 +1,39 @@
 //! Private newline-delimited JSON bridge used by the macOS app.
 //!
-//! Authentication and routing stay in the system OpenSSH client so aliases,
-//! ssh-agent, IdentityFile and ProxyJump keep their normal semantics. The
-//! helper deliberately uses StrictHostKeyChecking: host-key enrollment is a
-//! separate, explicit UI operation.
+//! The helper spawns the system `ssh` client directly (`ssh -s <dest> sftp`)
+//! so authentication and routing keep their normal OpenSSH semantics:
+//! aliases, ssh-agent, IdentityFile and ProxyJump all work, and password /
+//! passphrase prompts are served through an askpass bridge back to the app
+//! (the app sets SSH_ASKPASS/SSH_ASKPASS_REQUIRE on this process and listens
+//! on the socket named by ARBOR_ASKPASS_SOCKET).
+//!
+//! Host-key enrollment stays explicit: StrictHostKeyChecking=yes, so new or
+//! changed keys fail here and are resolved by the app's verification UI.
 
 use std::{
     env,
     io::{self, BufRead, Write},
     path::Path,
+    process::Stdio,
     time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::{pin_mut, StreamExt};
-use openssh::{KnownHosts, SessionBuilder};
 use openssh_sftp_client::{metadata::MetaData, Sftp, SftpOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::process::{Child, Command};
+
+const MAX_REMOVE_DEPTH: u32 = 64;
 
 #[derive(Debug)]
 struct ConnectionOptions {
     destination: String,
     user: Option<String>,
     port: Option<u16>,
+    identity_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +66,8 @@ enum Operation {
     Remove {
         path: String,
         is_directory: bool,
+        #[serde(default)]
+        recursive: bool,
     },
     Ping,
 }
@@ -86,34 +97,172 @@ struct ProtocolError {
     message: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let options = parse_args(env::args().skip(1))?;
-    let mut builder = SessionBuilder::default();
-    builder
-        .known_hosts_check(KnownHosts::Strict)
-        .connect_timeout(Duration::from_secs(15))
-        .server_alive_interval(Duration::from_secs(30));
-    if let Some(user) = options.user {
-        builder.user(user);
+/// Askpass bridge entry: ssh (or ssh-add) invokes $SSH_ASKPASS with the
+/// prompt as argv[1]; the answer comes from the app over a unix socket.
+fn run_askpass() -> Result<()> {
+    let socket_path = env::var("ARBOR_ASKPASS_SOCKET").context("ARBOR_ASKPASS_SOCKET missing")?;
+    let prompt = env::args().nth(1).unwrap_or_default();
+
+    let stream = connect_with_retry(&socket_path)?;
+    stream.set_read_timeout(Some(Duration::from_secs(300)))?;
+    let mut writer = stream
+        .try_clone()
+        .context("failed to clone askpass socket")?;
+    let mut reader = io::BufReader::new(stream);
+
+    let request = json!({ "prompt": prompt });
+    writer.write_all(request.to_string().as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .context("askpass reply failed")?;
+    let reply: Value = serde_json::from_str(line.trim()).context("invalid askpass reply")?;
+
+    if reply.get("cancelled").and_then(Value::as_bool) == Some(true) {
+        std::process::exit(1);
+    }
+    let secret = reply
+        .get("secret")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    println!("{secret}");
+    Ok(())
+}
+
+fn connect_with_retry(path: &str) -> Result<std::os::unix::net::UnixStream> {
+    let mut last_error = None;
+    for _ in 0..50 {
+        match std::os::unix::net::UnixStream::connect(path) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(last_error
+        .map(|error| anyhow::anyhow!("cannot reach askpass socket: {error}"))
+        .unwrap_or_else(|| anyhow::anyhow!("cannot reach askpass socket")))
+}
+
+fn spawn_ssh(options: &ConnectionOptions) -> Result<Child> {
+    let mut command = Command::new("ssh");
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        // No -q: the app classifies failures from ssh's stderr, and it is
+        // piped (never shown to the user directly).
+        .arg("-T")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=15")
+        .arg("-o")
+        .arg("ServerAliveInterval=30");
+    if let Some(user) = &options.user {
+        command.arg("-l").arg(user);
+    }
+    if let Some(identity) = &options.identity_file {
+        command.arg("-i").arg(identity);
+        // Only the chosen key is offered; agent keys must not silently win.
+        command.arg("-o").arg("IdentitiesOnly=yes");
     }
     if let Some(port) = options.port {
-        builder.port(port);
+        command.arg("-p").arg(port.to_string());
+    }
+    // `-s` marks the remote command as a subsystem: `ssh -s <dest> sftp`.
+    command.arg("-s").arg(&options.destination).arg("sftp");
+    let child = command.spawn().context("failed to spawn ssh")?;
+    Ok(child)
+}
+
+/// Optional debug log (set ARBOR_HELPER_LOG to a file path). Never enabled by
+/// the app in normal operation.
+fn debug_log(message: &str) {
+    let Ok(path) = env::var("ARBOR_HELPER_LOG") else {
+        return;
+    };
+    use std::fmt::Write as _;
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let mut line = String::new();
+    let _ = writeln!(line, "{millis} {message}");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    if env::var_os("ARBOR_ASKPASS_SOCKET").is_some()
+        && !env::args().skip(1).any(|arg| arg == "--destination")
+    {
+        return run_askpass();
     }
 
-    let session = builder
-        .connect(&options.destination)
-        .await
-        .context("OpenSSH connection failed")?;
-    let sftp = Sftp::from_session(session, SftpOptions::default())
-        .await
-        .context("SFTP subsystem failed")?;
+    let options = parse_args(env::args().skip(1))?;
+    let mut child = spawn_ssh(&options)?;
+    let stdin = child.stdin.take().context("ssh stdin missing")?;
+    let stdout = child.stdout.take().context("ssh stdout missing")?;
+
+    // Capture ssh's stderr (for diagnostics) and tee it to our own stderr:
+    // the app classifies connection failures (host key, auth) from whatever
+    // we emit. The task ends when the child closes the pipe.
+    let stderr_task = child.stderr.take().map(|mut stderr| {
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut captured = String::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                match stderr.read(&mut chunk).await {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        let text = String::from_utf8_lossy(&chunk[..read]).into_owned();
+                        eprint!("{text}");
+                        captured.push_str(&text);
+                    }
+                    Err(_) => break,
+                }
+            }
+            captured
+        })
+    });
+
+    let sftp = match Sftp::new(stdin, stdout, SftpOptions::default()).await {
+        Ok(sftp) => sftp,
+        Err(error) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            // Give the stderr task a chance to finish so its output reaches
+            // our stderr before the runtime tears down.
+            let details = match stderr_task {
+                Some(task) => task.await.unwrap_or_default(),
+                None => String::new(),
+            };
+            let details = details.trim();
+            if details.is_empty() {
+                bail!("SFTP subsystem negotiation failed: {error:#}");
+            }
+            bail!(
+                "SFTP subsystem negotiation failed: {error:#}
+{details}"
+            );
+        }
+    };
     let mut fs = sftp.fs();
 
     let stdin = io::stdin();
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     for line in stdin.lock().lines() {
         let line = line.context("failed to read request")?;
+        debug_log(&format!("request: {line}"));
         if line.trim().is_empty() {
             continue;
         }
@@ -145,13 +294,19 @@ async fn main() -> Result<()> {
         stdout.flush()?;
     }
 
-    sftp.close().await.context("failed to close SFTP session")
+    drop(fs);
+    sftp.close().await.context("failed to close SFTP session")?;
+    let _ = child.kill().await;
+    Ok(())
 }
 
 async fn execute(fs: &mut openssh_sftp_client::fs::Fs, operation: Operation) -> Result<Value> {
+    debug_log(&format!("execute: {operation:?}"));
     match operation {
         Operation::List { path } => {
+            debug_log("list: open_dir...");
             let directory = fs.open_dir(&path).await?;
+            debug_log("list: open_dir done");
             let stream = directory.read_dir();
             pin_mut!(stream);
             let mut entries = Vec::new();
@@ -163,6 +318,7 @@ async fn execute(fs: &mut openssh_sftp_client::fs::Fs, operation: Operation) -> 
                 }
                 entries.push(entry_value(name.into_owned(), entry.metadata()));
             }
+            debug_log(&format!("list: {} entries", entries.len()));
             Ok(serde_json::to_value(entries)?)
         }
         Operation::Stat { path } => {
@@ -191,9 +347,17 @@ async fn execute(fs: &mut openssh_sftp_client::fs::Fs, operation: Operation) -> 
             fs.rename(from, to).await?;
             Ok(json!({}))
         }
-        Operation::Remove { path, is_directory } => {
+        Operation::Remove {
+            path,
+            is_directory,
+            recursive,
+        } => {
             if is_directory {
-                fs.remove_dir(path).await?;
+                if recursive {
+                    remove_tree(fs, &path, 0).await?;
+                } else {
+                    fs.remove_dir(path).await?;
+                }
             } else {
                 fs.remove_file(path).await?;
             }
@@ -201,6 +365,38 @@ async fn execute(fs: &mut openssh_sftp_client::fs::Fs, operation: Operation) -> 
         }
         Operation::Ping => Ok(json!({ "protocol": 1 })),
     }
+}
+
+/// Depth-first recursive delete. Symlinks are removed without following.
+async fn remove_tree(fs: &mut openssh_sftp_client::fs::Fs, path: &str, depth: u32) -> Result<()> {
+    if depth > MAX_REMOVE_DEPTH {
+        bail!("directory nesting exceeds {MAX_REMOVE_DEPTH} levels; refusing to delete");
+    }
+    let directory = fs.open_dir(path).await?;
+    let stream = directory.read_dir();
+    pin_mut!(stream);
+    let mut children = Vec::new();
+    while let Some(entry) = stream.next().await {
+        let entry = entry?;
+        let name = entry.filename().to_string_lossy();
+        if name == "." || name == ".." {
+            continue;
+        }
+        children.push((name.into_owned(), entry.metadata()));
+    }
+    let prefix = path.trim_end_matches('/');
+    for (name, metadata) in children {
+        let child = format!("{prefix}/{name}");
+        let file_type = metadata.file_type();
+        if file_type.is_some_and(|kind| kind.is_dir()) {
+            Box::pin(remove_tree(fs, &child, depth + 1)).await?;
+        } else {
+            // Files, symlinks, and anything else are unlinked directly.
+            fs.remove_file(child).await?;
+        }
+    }
+    fs.remove_dir(path).await?;
+    Ok(())
 }
 
 fn entry_value(name: String, metadata: MetaData) -> Entry {
@@ -256,11 +452,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<ConnectionOptions> {
     let mut destination = None;
     let mut user = None;
     let mut port = None;
+    let mut identity_file = None;
     let mut args = args.peekable();
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--destination" => destination = args.next(),
             "--user" => user = args.next(),
+            "--identity-file" => identity_file = args.next(),
             "--port" => {
                 port = Some(
                     args.next()
@@ -276,6 +474,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<ConnectionOptions> {
         destination: destination.context("--destination is required")?,
         user,
         port,
+        identity_file,
     })
 }
 
@@ -297,10 +496,53 @@ mod tests {
     }
 
     #[test]
+    fn parses_identity_file() {
+        let options = parse_args(
+            ["--destination", "host", "--identity-file", "/tmp/key"]
+                .into_iter()
+                .map(String::from),
+        )
+        .unwrap();
+        assert_eq!(options.identity_file.as_deref(), Some("/tmp/key"));
+    }
+
+    #[test]
     fn request_is_tagged_by_method() {
         let request: Request =
             serde_json::from_str(r#"{"id":7,"method":"list","path":"/srv"}"#).unwrap();
         assert_eq!(request.id, 7);
         assert!(matches!(request.operation, Operation::List { .. }));
+    }
+
+    #[test]
+    fn remove_request_supports_recursive_flag() {
+        let request: Request = serde_json::from_str(
+            r#"{"id":8,"method":"remove","path":"/srv/x","is_directory":true,"recursive":true}"#,
+        )
+        .unwrap();
+        match request.operation {
+            Operation::Remove {
+                path,
+                is_directory,
+                recursive,
+            } => {
+                assert_eq!(path, "/srv/x");
+                assert!(is_directory);
+                assert!(recursive);
+            }
+            other => panic!("unexpected operation: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_request_defaults_to_non_recursive() {
+        let request: Request = serde_json::from_str(
+            r#"{"id":9,"method":"remove","path":"/srv/x","is_directory":true}"#,
+        )
+        .unwrap();
+        match request.operation {
+            Operation::Remove { recursive, .. } => assert!(!recursive),
+            other => panic!("unexpected operation: {other:?}"),
+        }
     }
 }

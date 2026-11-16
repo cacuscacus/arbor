@@ -27,6 +27,8 @@ struct SSHLocationProfile: Codable, Hashable, Identifiable, Sendable {
     var displayName: String
     var endpoint: SSHEndpoint
     var authentication: SSHAuthenticationPreference
+    /// Explicit private key (like `ssh -i`). nil = OpenSSH defaults + agent.
+    var identityFile: String?
     var rootPath: String
 
     init(
@@ -36,6 +38,7 @@ struct SSHLocationProfile: Codable, Hashable, Identifiable, Sendable {
         displayName: String,
         endpoint: SSHEndpoint,
         authentication: SSHAuthenticationPreference = .automatic,
+        identityFile: String? = nil,
         rootPath: String
     ) {
         self.id = id
@@ -45,6 +48,7 @@ struct SSHLocationProfile: Codable, Hashable, Identifiable, Sendable {
         self.displayName = displayName
         self.endpoint = endpoint
         self.authentication = authentication
+        self.identityFile = identityFile
         self.rootPath = ItemRef(volumeID: self.volumeID, path: rootPath).path
     }
 

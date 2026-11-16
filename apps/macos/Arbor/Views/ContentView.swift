@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage(TerminalPreferences.isVisibleKey) private var isTerminalVisible = false
     @AppStorage(TerminalPreferences.followCwdKey) private var followCwd = true
     @State private var terminalRestartToken = UUID()
+    @State private var sshPrompt: SSHAskpassService.Prompt?
     @Bindable private var agentRun = AgentRunCoordinator.shared
     @State private var windowSort = WindowBrowserSortStore()
 
@@ -99,6 +100,16 @@ struct ContentView: View {
             RunAgentSheet(
                 context: request.context
             )
+        }
+        .sheet(item: $sshPrompt) { prompt in
+            SSHAskpassPromptSheet(prompt: prompt)
+        }
+        .onAppear {
+            SSHAskpassService.shared.onPromptChange = {
+                Task { @MainActor in
+                    presentNextSSHPrompt()
+                }
+            }
         }
         .alert(
             "Could not run agent",
@@ -228,6 +239,11 @@ struct ContentView: View {
                 .opacity(0)
                 .allowsHitTesting(false)
         }
+    }
+
+    /// Shows the next queued SSH askpass prompt, one sheet at a time.
+    private func presentNextSSHPrompt() {
+        sshPrompt = SSHAskpassService.shared.currentPrompts.first
     }
 
     private func openNewTab() {

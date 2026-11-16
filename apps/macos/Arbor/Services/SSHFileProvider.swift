@@ -206,7 +206,11 @@ struct SSHFileProvider: FileProvider, Sendable {
         do {
             let remote = try await entry(at: item)
             let connection = await SSHTransportPool.shared.connection(for: profile)
-            try await connection.remove(path: item.path, isDirectory: remote.isDirectory)
+            try await connection.remove(
+                path: item.path,
+                isDirectory: remote.isDirectory,
+                recursive: remote.isDirectory
+            )
         } catch {
             throw map(error, item: item)
         }
@@ -278,6 +282,8 @@ struct SSHFileProvider: FileProvider, Sendable {
         switch transport {
         case .hostKeyVerification:
             return FileProviderError.hostKeyVerificationRequired(profile.connectionID)
+        case .hostKeyChanged:
+            return FileProviderError.hostKeyChangedRequired(profile.connectionID)
         case .authentication:
             return FileProviderError.authenticationRequired(profile.connectionID)
         case .connection, .helperUnavailable:
