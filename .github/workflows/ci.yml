@@ -57,3 +57,14 @@ jobs:
           assert "REPLACE_WITH" not in text, "placeholder checksum still present"
           print("cask ok")
           PY
+
+  swift:
+    name: Swift pure-logic tests
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SPM tests (Markdown renderer, languages, Go to Folder, search pattern)
+        run: swift test

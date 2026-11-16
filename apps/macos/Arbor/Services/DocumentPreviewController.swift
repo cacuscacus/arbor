@@ -24,7 +24,7 @@ final class DocumentPreviewController: NSObject, NSWindowDelegate {
     }
 
     /// What the current file is rendered as.
-    enum Kind: Equatable {
+    nonisolated enum Kind: Equatable {
         case markdown
         case code(SourceLanguage)
 
@@ -49,6 +49,7 @@ final class DocumentPreviewController: NSObject, NSWindowDelegate {
     private static let zoomStep: Double = 0.1
 
     @ObservationIgnored private var webView: WKWebView?
+    @ObservationIgnored private var assetHandler: DocumentAssetSchemeHandler?
     @ObservationIgnored private var window: NSWindow?
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var documentID = ""
@@ -132,6 +133,7 @@ final class DocumentPreviewController: NSObject, NSWindowDelegate {
         documentID = UUID().uuidString
         mode = .view
         saveError = nil
+        assetHandler?.bind(documentRoot: url.deletingLastPathComponent())
 
         let text = Self.loadText(at: url)
         savedText = text
@@ -293,6 +295,7 @@ final class DocumentPreviewController: NSObject, NSWindowDelegate {
         let configuration = WKWebViewConfiguration()
         let handler = DocumentAssetSchemeHandler()
         handler.controller = self
+        assetHandler = handler
         configuration.setURLSchemeHandler(handler, forURLScheme: MarkdownHTMLRenderer.assetScheme)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -384,6 +387,7 @@ final class DocumentPreviewController: NSObject, NSWindowDelegate {
         }
         documentURL = nil
         documentID = ""
+        assetHandler?.bind(documentRoot: nil)
         mode = .view
         draftText = ""
         savedText = ""
@@ -463,17 +467,25 @@ extension DocumentPreviewController: WKNavigationDelegate {
 nonisolated final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler {
     weak var controller: DocumentPreviewController?
 
-    static let vendorHost = "vendor"
-    private static var vendorCache: [String: Data] = [:]
+    private let lock = NSLock()
+    private var documentRoot: URL?
+    private var vendorCache: [String: Data] = [:]
 
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        // WebKit calls scheme handlers on the main thread.
-        MainActor.assumeIsolated {
-            serve(urlSchemeTask)
-        }
+    /// Called on the main actor whenever a document is shown or cleared.
+    func bind(documentRoot: URL?) {
+        lock.lock()
+        self.documentRoot = documentRoot
+        lock.unlock()
     }
 
-    @MainActor
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        // Fully synchronous, thread-safe serving: file reads need no main
+        // actor, and all mutable state is behind `lock`. Never route this
+        // through MainActor.assumeIsolated — WebKit does not guarantee the
+        // calling thread.
+        serve(urlSchemeTask)
+    }
+
     private func serve(_ urlSchemeTask: WKURLSchemeTask) {
         let fail: (Error) -> Void = { error in
             urlSchemeTask.didFailWithError(error)
@@ -496,6 +508,14 @@ nonisolated final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler
             return
         }
 
+        lock.lock()
+        let hasDocument = documentRoot != nil
+        lock.unlock()
+        guard hasDocument else {
+            fail(DocumentAssetError.noDocument)
+            return
+        }
+
         let candidate = URL(fileURLWithPath: absolutePath).standardizedFileURL
         let type = UTType(filenameExtension: candidate.pathExtension)
         guard let mime = type?.preferredMIMEType,
@@ -513,13 +533,19 @@ nonisolated final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler
         respond(task: urlSchemeTask, data: data, mime: mime, url: url)
     }
 
-    @MainActor
+    static let vendorHost = "vendor"
+
     private func serveVendorAsset(_ url: URL, task: WKURLSchemeTask, fail: (Error) -> Void) {
         let fileName = (url.path as NSString).lastPathComponent
-        if let cached = Self.vendorCache[fileName] {
+
+        lock.lock()
+        if let cached = vendorCache[fileName] {
+            vendorCache[fileName] = cached
+            lock.unlock()
             respond(task: task, data: cached, mime: Self.mimeType(for: fileName), url: url)
             return
         }
+        lock.unlock()
 
         let nsName = fileName as NSString
         let name = nsName.deletingPathExtension
@@ -535,7 +561,10 @@ nonisolated final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler
             fail(DocumentAssetError.notFound(fileName))
             return
         }
-        Self.vendorCache[fileName] = data
+
+        lock.lock()
+        vendorCache[fileName] = data
+        lock.unlock()
         respond(task: task, data: data, mime: Self.mimeType(for: fileName), url: url)
     }
 
@@ -549,7 +578,6 @@ nonisolated final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler
         }
     }
 
-    @MainActor
     private func respond(task: WKURLSchemeTask, data: Data, mime: String, url: URL) {
         let response = URLResponse(
             url: url,

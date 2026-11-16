@@ -336,7 +336,11 @@ private struct SessionWindowFrameTracker: NSViewRepresentable {
                         guard let self,
                               let win = notification.object as? NSWindow
                         else { return }
-                        BrowserSessionStore.shared.updateFrame(id: self.windowID, frame: win.frame)
+                        // The queue is `.main`, but the closure is Sendable;
+                        // hop instead of calling the MainActor store directly.
+                        Task { @MainActor in
+                            BrowserSessionStore.shared.updateFrame(id: self.windowID, frame: win.frame)
+                        }
                     }
                     observers.append(token)
                 }

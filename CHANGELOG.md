@@ -11,6 +11,17 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Fixed
+
+- Quick Look: panel data source no longer routes through `MainActor.assumeIsolated` (lock-protected storage instead), the arrow-key sync matches by URL so mixed/remote listings select the right row, and the index-change callback is released when the panel closes
+- Document preview: the local-asset scheme handler is now fully thread-safe (`vendorCache` behind a lock, document root bound explicitly) with no main-actor assumption
+- Eliminated all build warnings (concurrency isolation in `MarkdownHTMLRenderer`, `DocumentPreviewController`, `ContentView`)
+
+### Changed
+
+- `BreadcrumbBar` extracted from `FileBrowserView` into its own file; `FilenameSearchPattern` extracted from `SearchService`
+- Pure Foundation logic (Markdown renderer, source-language detection, Go to Folder resolver, search pattern) now has 47 SPM unit tests running in CI via a new `swift test` job
+
 ## [1.6.1] — 2026-11-13
 
 ### Added

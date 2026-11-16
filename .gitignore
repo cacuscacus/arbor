@@ -55,3 +55,7 @@ plugins/**/target/
 
 # Local manual-test fixture
 /test_file_structure/
+
+# SwiftPM (pure-logic test package)
+.build/
+.swiftpm/

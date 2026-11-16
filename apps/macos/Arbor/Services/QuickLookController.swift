@@ -15,11 +15,15 @@ import Quartz
 final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     static let shared = QuickLookController()
 
-    /// URLs currently offered to the panel, in listing order.
-    private(set) var urls: [URL] = []
+    /// URLs offered to the panel. The panel's data source can be consulted
+    /// from threads AppKit does not guarantee are the main thread, so the
+    /// storage is lock-protected instead of relying on `MainActor.assumeIsolated`.
+    nonisolated private let items = PreviewItems()
 
     /// Called when arrow keys move the preview, so the browser can follow.
-    var onIndexChange: ((Int) -> Void)?
+    /// Receives the previewed URL (not an index) so the browser can map it
+    /// back to its own listing even for mixed/remote listings.
+    var onIndexChange: ((URL) -> Void)?
 
     private var monitor: Any?
 
@@ -38,7 +42,7 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
             close()
             return
         }
-        if isVisible, newURLs == urls {
+        if isVisible, newURLs == items.urls {
             close()
             return
         }
@@ -47,7 +51,7 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
 
     func show(urls newURLs: [URL], startIndex: Int) {
         guard !newURLs.isEmpty, let panel else { return }
-        urls = newURLs
+        items.urls = newURLs
 
         panel.dataSource = self
         panel.delegate = self
@@ -78,13 +82,13 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
             return
         }
         let index = min(max(startIndex, 0), newURLs.count - 1)
-        if newURLs == urls {
+        if newURLs == items.urls {
             if panel.currentPreviewItemIndex != index {
                 panel.currentPreviewItemIndex = index
             }
             return
         }
-        urls = newURLs
+        items.urls = newURLs
         panel.currentPreviewItemIndex = index
         panel.reloadData()
     }
@@ -92,21 +96,19 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
     func close() {
         if let panel, isVisible {
             panel.orderOut(nil)
+        } else {
+            teardown()
         }
-        teardown()
     }
 
     // MARK: - QLPreviewPanelDataSource
 
     nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        MainActor.assumeIsolated { urls.count }
+        items.count
     }
 
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        MainActor.assumeIsolated {
-            guard urls.indices.contains(index) else { return nil }
-            return urls[index] as NSURL
-        }
+        items[index] as NSURL?
     }
 
     // MARK: - Keyboard while the panel is key
@@ -136,16 +138,20 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
     }
 
     private func step(by delta: Int) {
-        guard urls.count > 1, let panel else { return }
-        let next = min(max(panel.currentPreviewItemIndex + delta, 0), urls.count - 1)
+        guard items.count > 1, let panel else { return }
+        let next = min(max(panel.currentPreviewItemIndex + delta, 0), items.count - 1)
         guard next != panel.currentPreviewItemIndex else { return }
         panel.currentPreviewItemIndex = next
-        onIndexChange?(next)
+        if let url = items[next] {
+            onIndexChange?(url)
+        }
     }
 
     @objc private func panelWillClose(_ note: Notification) {
-        MainActor.assumeIsolated {
-            teardown()
+        // Notification delivery is not guaranteed to be main-actor in Swift's
+        // eyes; hop instead of assuming isolation.
+        Task { @MainActor in
+            self.teardown()
         }
     }
 
@@ -163,6 +169,28 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
             if panel.dataSource === self { panel.dataSource = nil }
             if panel.delegate === self { panel.delegate = nil }
         }
-        urls = []
+        items.urls = []
+        onIndexChange = nil
+    }
+
+    // MARK: - Thread-safe item storage
+
+    nonisolated private final class PreviewItems: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [URL] = []
+
+        var urls: [URL] {
+            get { lock.lock(); defer { lock.unlock() }; return storage }
+            set { lock.lock(); defer { lock.unlock() }; storage = newValue }
+        }
+
+        var count: Int {
+            lock.lock(); defer { lock.unlock() }; return storage.count
+        }
+
+        subscript(index: Int) -> URL? {
+            lock.lock(); defer { lock.unlock() }
+            return storage.indices.contains(index) ? storage[index] : nil
+        }
     }
 }

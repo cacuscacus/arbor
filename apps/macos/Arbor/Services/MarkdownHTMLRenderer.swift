@@ -293,7 +293,7 @@ nonisolated enum MarkdownHTMLRenderer {
 
 // MARK: - Block parser
 
-private struct BlockParser {
+nonisolated private struct BlockParser {
     let lines: [String]
     var index = 0
     let context: MarkdownHTMLRenderer.Context
@@ -721,7 +721,7 @@ private struct BlockParser {
 
 // MARK: - Inline parser
 
-private enum Inline {
+nonisolated private enum Inline {
     /// Destination allows one level of balanced parentheses so URLs like
     /// `javascript:alert(1)` or `Foo_(bar)` parse instead of leaking markup.
     private static let destination = #"((?:[^()\s]|\([^()]*\))+)"#
