@@ -49,7 +49,7 @@ Packaging / Homebrew release flow: [docs/RELEASES.md](docs/RELEASES.md).
 ## Pull request checklist
 
 - [ ] `./scripts/dev-check.sh` passes locally
-- [ ] New behavior has tests (prefer `arbor-core` / CLI / FFI over UI-only logic)
+- [ ] New behavior has tests (pure logic in the SPM test suite / Rust crates; UI work note manual verification)
 - [ ] Docs updated when behavior or install/release steps change (`README.md`, `CHANGELOG.md`, `docs/`, cask)
 - [ ] No unrelated formatting or drive-by refactors
 - [ ] Clear PR description: *what* changed and *why*
@@ -65,7 +65,7 @@ Packaging / Homebrew release flow: [docs/RELEASES.md](docs/RELEASES.md).
 ## Code style
 
 - **Rust**: `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`
-- Prefer small crates/modules; keep SwiftUI thin and put logic in `arbor-core` when possible
+- Prefer small modules; keep views thin and logic in pure, testable types (SPM-tested Swift or Rust sidecars) — see `docs/ARCHITECTURE.md`
 - Do not commit signing secrets, notarization credentials, or `dist/` build products
 
 ## Commit messages

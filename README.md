@@ -54,27 +54,22 @@ Arbor aims to be the filesystem equivalent of VS Code:
 
 ## Architecture
 
-```
-UI (SwiftUI / native Linux & Windows)
-        ↓
-   Rust Core (FFI)
-        ↓
-┌───────────────────────────────────────┐
-│  Filesystem · Search · Watcher        │
-│  Metadata · Preview · Scheduler       │
-│  Plugins · AI Layer · Terminal Layer  │
-└───────────────────────────────────────┘
+The macOS app is Swift end-to-end (SwiftUI + AppKit): browsing, search
+(Spotlight → `fd` → walk), previews (Markdown/Mermaid/code), terminal,
+and agents all live behind a provider-neutral `FileProvider` model that
+already abstracts local disks and SSH/SFTP. Rust ships in the app as
+`arbor-sftp-helper`, a stdio-IPC sidecar per SSH connection — the
+pattern for future native-capability sidecars.
+
+```text
+Arbor.app (Swift)  ──spawn/NDJSON──►  arbor-sftp-helper (Rust)
+      │                                    SFTP over OpenSSH
+      └── provider model: Local · SSH  ·  (SMB/S3 later)
 ```
 
-| Layer | Role |
-|-------|------|
-| **UI** | Native per OS — SwiftUI (macOS); Linux & Windows UIs planned |
-| **arbor-core** | Filesystem, search, watcher, metadata, preview, scheduler |
-| **arbor-ffi** | C ABI bridge for native UIs |
-| **arbor-cli** | Headless / scripting entry point |
-| **Plugins** | Rust (+ Lua / Python / JS scripting APIs) |
-| **AI Layer** | NL → shell commands; Claude Code, Codex, Cursor CLI, Ollama, … |
-| **Terminal Layer** | Per-folder terminals (bash, zsh, fish, nushell, PowerShell) |
+Cross-platform ports (Linux/Windows) will reuse the provider contracts
+and pure logic (unit-tested via `swift test`), deciding on a shared
+Rust core when those ports begin. Full details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -82,15 +77,18 @@ UI (SwiftUI / native Linux & Windows)
 
 ```
 arbor/
-├── apps/macos/         # SwiftUI shell
+├── apps/macos/         # Swift app (Xcode project)
 ├── crates/
-│   ├── arbor-core/     # Core library (+ unit tests)
-│   ├── arbor-ffi/      # FFI bridge (+ unit tests)
-│   └── arbor-cli/      # CLI (+ integration tests)
+│   ├── arbor-sftp-helper/  # Rust sidecar: SFTP bridge (ships in app)
+│   ├── arbor-cli/          # CLI smoke tool for CI
+│   ├── arbor-core/         # Rust core candidate (not linked yet)
+│   └── arbor-ffi/          # C ABI stubs (not linked yet)
+├── Tests/              # SPM unit tests for pure logic (swift test)
+├── Package.swift       # SPM package for the pure-logic tests
 ├── Casks/              # Homebrew cask
 ├── CHANGELOG.md        # Release history (Help → Release History)
 ├── docs/               # Architecture, roadmap, releases, vision
-├── scripts/            # dev-check, packaging
+├── scripts/            # dev-check, packaging, test fixtures
 └── .github/workflows/  # CI
 ```
 
@@ -98,14 +96,14 @@ arbor/
 
 ## Status
 
-**Public MVP on macOS.** [v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0) shipped the Finder-like browser; [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag/v1.1.0) added multi-window. See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
+**Actively shipping on macOS.** Latest: [v1.6.1](https://github.com/cacuscacus/arbor/releases/tag/v1.6.1) — rendered Markdown/Mermaid/code previews with quick edit, overhauled search, Quick Look, Go to Folder, and SSH/SFTP locations (MVP). See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ### Near-term focus
 
-1. Grow `arbor-core` + FFI coverage; thin the SwiftUI layer
-2. Richer search (`fd` / walk + query language)
-3. Terminal session restore, multiple terminal tabs, and in-window AI agent runners
-4. In-app **Check for Updates…** via GitHub Releases API
+1. Finish SSH locations MVP: interactive auth, host-key rotation flow, remote delete ([Phase 6](docs/ROADMAP.md))
+2. Richer search: query language (`kind:`, `size>`, `modified:`), content search
+3. Ambient Git: status badges, diff vs HEAD
+4. Browser polish: tab reorder, Open in New Tab, vertical split
 
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 

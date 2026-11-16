@@ -2,7 +2,7 @@
 
 Status legend: ⬚ planned · ◐ in progress · ✓ done
 
-Priorities may shift. **macOS remains the reference implementation**; other OS ports reuse `arbor-core` behind a native UI.
+Priorities may shift. **macOS remains the reference implementation**; other OS ports reuse the provider contracts and pure logic behind a native UI (see [ARCHITECTURE.md](ARCHITECTURE.md) for the current split).
 
 **Shipped through [v1.4.1](https://github.com/cacuscacus/arbor/releases/tag/v1.4.1):** Finder-class browse (windows, tabs, split, session restore, DnD, live folder refresh), embedded terminal, **agent runners** (Settings → Tools + Run Agent Here…), Help → Release History / Check for Updates, Homebrew + GitHub Releases.
 
@@ -21,7 +21,7 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 - ✓ `arbor-core` directory listing API (+ tests)
 - ✓ `arbor-ffi` minimal C ABI (`list_dir`, version)
 - ✓ SwiftUI shell MVP: sidebar, list/icon views, search, DnD, undo ([v1.0.0](https://github.com/cacuscacus/arbor/releases/tag/v1.0.0))
-- ⬚ Move remaining FS work from Swift into `arbor-core` / FFI
+- ⬚ Grow portable FS/search contracts behind the `FileProvider` boundary; promote code into `arbor-core` only where a shared implementation pays off (sidecars first — see ARCHITECTURE.md)
 - ◐ Keyboard navigation (arrows, Enter, Backspace, `/` search — keep hardening)
 - ✓ `arbor-cli` for smoke tests without UI
 
@@ -168,7 +168,7 @@ Largely shipped across [v1.1.0](https://github.com/cacuscacus/arbor/releases/tag
 - ✓ Drag-and-drop between panes (copy/move; pane-root drop + cross-pane listing refresh in [v1.3.1](https://github.com/cacuscacus/arbor/releases/tag/v1.3.1))
 - ✓ “Open in Split” from selection (browser / Favorites); View → Toggle Split View (⌘⌥S) / Close Split View
 
-Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** from `arbor-core` so behavior matches.
+Implementation note: macOS first (SwiftUI `WindowGroup` + tab/split containers + Codable session store). Other OS ports implement the same **session schema** so behavior matches.
 
 ---
 
@@ -236,7 +236,7 @@ Analysis (2026-08-15): [`REMOTE-SSH.md`](REMOTE-SSH.md). Intent: sidebar **SSH l
 
 ## Phase 7 — Cross-platform (native UI per OS)
 
-Strategy: **one Rust core (`arbor-core` + FFI/IPC), native UI per platform** — not a single lowest-common-denominator web shell as the long-term UX. Shared session, FS, search, agent-runner, and diff schemas live in core so features land once and surface everywhere.
+Strategy: **shared contracts, native UI per platform** — not a single lowest-common-denominator web shell. The portability boundary is the provider-neutral `FileProvider` / `ItemRef` model plus pure logic (already Foundation-only and SPM-tested); native capabilities ride Rust sidecars over stdio IPC (the `arbor-sftp-helper` pattern). Whether a full `arbor-core` runtime becomes the porting core is decided when the first port starts — grown from real shared needs (search, metadata), not by rewriting working Swift.
 
 ### Linux
 
