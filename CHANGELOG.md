@@ -11,6 +11,15 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.6] — 2026-11-24
+
+### Fixed
+
+- **List view scrolled on the first click and selected a different row** (double-click could not open folders either). AppKit expressed the floating chrome as a scroll content inset whose resting origin is negative; when it revealed the selected row it clamped that origin to 0, scrolling the list by the chrome height (about three rows) and moving the row under the cursor. The list now keeps the chrome gap as layout padding and the table's scroll view carries no content inset: the origin stays 0 and there is nothing to clamp
+- **Double-click on a row** resolves the row from the click event instead of `clickedRow`, which is `-1` for SwiftUI's table at that point
+- `ScrollEdgeEffectEnabler` no longer forces `automaticallyAdjustsContentInsets` on every scroll view (the source of those negative origins)
+
+
 ## [1.7.4] — 2026-11-24
 
 ### Fixed
@@ -276,7 +285,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.4...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.6...HEAD
+[1.7.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.6
 [1.7.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.4
 [1.7.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.3
 [1.7.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.2

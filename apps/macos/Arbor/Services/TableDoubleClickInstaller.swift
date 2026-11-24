@@ -101,7 +101,14 @@ struct TableInteractionInstaller: NSViewRepresentable {
         @objc func tableDoubleClicked(_ sender: Any?) {
             cancelPendingRename()
             guard let table = sender as? NSTableView else { return }
-            let row = table.clickedRow
+            // `clickedRow` is -1 here for SwiftUI's table (the double-click is
+            // dispatched after SwiftUI resets it); resolve from the event.
+            let row: Int
+            if let event = NSApp.currentEvent {
+                row = table.row(at: table.convert(event.locationInWindow, from: nil))
+            } else {
+                row = table.clickedRow
+            }
             guard row >= 0, row < rowCount else { return }
             onDoubleClickRow(row)
         }
@@ -194,6 +201,18 @@ struct TableInteractionInstaller: NSViewRepresentable {
             table.action = #selector(Coordinator.tableClicked(_:))
             table.doubleAction = #selector(Coordinator.tableDoubleClicked(_:))
             table.focusRingType = .none
+
+            // No safe-area content inset on the table's scroll view: with an
+            // inset its resting origin is negative (-80 observed) and AppKit
+            // clamps it to 0 when revealing the selected row, scrolling the
+            // list by the chrome height. The chrome gap is padding above.
+            if let scroll = table.enclosingScrollView {
+                scroll.automaticallyAdjustsContentInsets = false
+                if scroll.contentInsets.top != 0 || scroll.contentInsets.bottom != 0 {
+                    scroll.contentInsets = NSEdgeInsets()
+                }
+                scroll.contentView.contentInsets = NSEdgeInsets()
+            }
         }
 
         /// The table lives in a sibling subtree of this SwiftUI background view,

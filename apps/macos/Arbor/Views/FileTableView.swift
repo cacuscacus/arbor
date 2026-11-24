@@ -168,6 +168,11 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
             onTransfer: onTransfer
         )
         .scrollEdgeEffectStyle(.soft, for: .top)
+        // Chrome gap as layout padding. The table's scroll view must not carry a
+        // safe-area content inset: its resting origin would be negative and
+        // AppKit clamps it to 0 when revealing the selected row, scrolling the
+        // list and moving the row under the cursor.
+        .padding(.top, 52)
         .background {
             TableInteractionInstaller(
                 rowCount: entries.count,
