@@ -126,6 +126,13 @@ final class BrowserSessionStore {
     // MARK: - Disk I/O
 
     private static var supportDirectoryURL: URL {
+        // Testing/portable builds can point at their own support directory so a
+        // second instance never touches the real session.
+        if let override = ProcessInfo.processInfo.environment["ARBOR_SUPPORT_DIRECTORY"],
+           !override.isEmpty
+        {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return root.appendingPathComponent("Arbor", isDirectory: true)

@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-11-24
+
+### Fixed
+
+- **Dropping files onto folders in icon view**: AppKit proposed an insertion point when the pointer was over a cell's padding, which rejected the drop. The whole icon+label area now resolves to the folder, and the target shows an accent plate while hovering
+- **List view had no drop feedback**: the folder under the pointer now highlights, so the destination is visible before releasing
+- **Dropping into a folder refreshed the listing twice**, which made rows jump for a frame right after the drop
+- `ARBOR_SUPPORT_DIRECTORY` lets a second build use its own session file, so testing never touches the real session
+
+
 ## [1.7.0] — 2026-11-24
 
 ### Added
@@ -239,7 +249,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.1
 [1.7.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.0
 [1.6.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.1
 [1.6.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.0

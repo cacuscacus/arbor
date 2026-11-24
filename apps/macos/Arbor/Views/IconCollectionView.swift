@@ -363,17 +363,48 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
 
     // MARK: Collection drag-and-drop (drop onto folders)
 
+    /// Folder currently under the drag, highlighted so the target is visible.
+    private var dropTargetIndex: Int?
+
+    private func setDropTargetIndex(_ index: Int?, in collectionView: NSCollectionView) {
+        guard dropTargetIndex != index else { return }
+        if let old = dropTargetIndex,
+           let item = collectionView.item(at: IndexPath(item: old, section: 0)) as? IconCollectionItem
+        {
+            item.setDropTargeted(false)
+        }
+        dropTargetIndex = index
+        if let index,
+           let item = collectionView.item(at: IndexPath(item: index, section: 0)) as? IconCollectionItem
+        {
+            item.setDropTargeted(true)
+        }
+    }
+
     func collectionView(
         _ collectionView: NSCollectionView,
         validateDrop draggingInfo: NSDraggingInfo,
         proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
         dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
     ) -> NSDragOperation {
-        let index = proposedDropIndexPath.pointee.item
+        // AppKit proposes `.before` when the pointer is over a cell's padding;
+        // resolve the cell ourselves so the whole icon+label area accepts drops.
+        let point = collectionView.convert(draggingInfo.draggingLocation, from: nil)
+        var index = proposedDropIndexPath.pointee.item
+        if !entries.indices.contains(index) || !entries[index].isBrowsable,
+           let hit = collectionView.indexPathForItem(at: point)?.item,
+           entries.indices.contains(hit),
+           entries[hit].isBrowsable
+        {
+            index = hit
+        }
         guard entries.indices.contains(index), entries[index].isBrowsable else {
+            setDropTargetIndex(nil, in: collectionView)
             proposedDropOperation.pointee = .before
             return []
         }
+        setDropTargetIndex(index, in: collectionView)
+        proposedDropIndexPath.pointee = IndexPath(item: index, section: 0) as NSIndexPath
         proposedDropOperation.pointee = .on
         return draggingInfo.draggingSourceOperationMask.intersection(
             NSEvent.modifierFlags.contains(.option) ? .copy : .move
@@ -382,10 +413,25 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
 
     func collectionView(
         _ collectionView: NSCollectionView,
+        draggingExited sender: NSDraggingInfo?
+    ) {
+        setDropTargetIndex(nil, in: collectionView)
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        draggingEnded sender: NSDraggingInfo
+    ) {
+        setDropTargetIndex(nil, in: collectionView)
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
         acceptDrop draggingInfo: NSDraggingInfo,
         indexPath: IndexPath,
         dropOperation: NSCollectionView.DropOperation
     ) -> Bool {
+        setDropTargetIndex(nil, in: collectionView)
         guard dropOperation == .on,
               entries.indices.contains(indexPath.item),
               entries[indexPath.item].isBrowsable
@@ -566,6 +612,7 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
     private var iconRequest: FileIcon.Request?
 
     private var entry: FileEntry?
+    private var isDropTargeted = false
     private var loadToken = UUID()
     private weak var actions: IconItemActionHandling?
 
@@ -700,6 +747,10 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         }
 
         applySelectionChrome(selected: selected)
+        if isDropTargeted, !selected {
+            selectionBackground.layer?.backgroundColor =
+                NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+        }
         setRenaming(renaming, draft: renameDraft)
     }
 
@@ -778,6 +829,16 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         didSet {
             view.layer?.backgroundColor = NSColor.clear.cgColor
         }
+    }
+
+    /// Accent plate shown while a file drag hovers this folder.
+    func setDropTargeted(_ targeted: Bool) {
+        guard isDropTargeted != targeted else { return }
+        isDropTargeted = targeted
+        guard !isSelected else { return }
+        selectionBackground.layer?.backgroundColor = targeted
+            ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+            : NSColor.clear.cgColor
     }
 
     @objc private func renameSubmitted() {

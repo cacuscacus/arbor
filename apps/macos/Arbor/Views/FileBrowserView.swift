@@ -1360,20 +1360,24 @@ private struct LocalFileBrowserView: View {
                 }
             }
 
-            if isSearchActive {
-                scheduleSearch()
-            } else {
-                reload()
-            }
             selection = newSelection
 
-            BrowserListingDidChange.post(
-                folders: FileTransferService.affectedFolders(
-                    for: outcome,
-                    destination: destination,
-                    operation: operation
-                )
+            let affected = FileTransferService.affectedFolders(
+                for: outcome,
+                destination: destination,
+                operation: operation
             )
+            // The notification below reloads this pane when its folder is
+            // affected; reloading here as well produced a double refresh that
+            // made rows jump for a frame on drop.
+            if !affected.contains(navigation.current) {
+                if isSearchActive {
+                    scheduleSearch()
+                } else {
+                    reload()
+                }
+            }
+            BrowserListingDidChange.post(folders: affected)
         }
     }
 

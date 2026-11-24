@@ -440,6 +440,8 @@ struct FolderDropDelegate: DropDelegate {
     /// When set, a folder row under the pointer wins over the pane's folder
     /// (so dropping anywhere on a folder row moves into it).
     var resolveDestination: (() -> ItemRef?)?
+    /// Reports the folder currently under the pointer so rows can highlight.
+    var onDropTargetChange: ((ItemRef?) -> Void)?
     let onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
 
     private var effectiveDestination: ItemRef {
@@ -452,18 +454,22 @@ struct FolderDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         isTargeted?.wrappedValue = true
+        onDropTargetChange?(resolveDestination?() ?? destination)
     }
 
     func dropExited(info: DropInfo) {
         isTargeted?.wrappedValue = false
+        onDropTargetChange?(nil)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: FileTransferOperation.fromModifierFlags.dropOperation)
+        onDropTargetChange?(resolveDestination?() ?? destination)
+        return DropProposal(operation: FileTransferOperation.fromModifierFlags.dropOperation)
     }
 
     func performDrop(info: DropInfo) -> Bool {
         isTargeted?.wrappedValue = false
+        onDropTargetChange?(nil)
         let operation = FileTransferOperation.fromModifierFlags
         let destination = effectiveDestination
         let items = dragState.items

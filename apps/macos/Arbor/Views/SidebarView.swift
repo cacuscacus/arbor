@@ -214,7 +214,7 @@ struct SidebarView: View {
     private var pendingAddURLs: [URL] {
         guard draggingFavoriteID == nil, transferTargetID == nil else { return [] }
         let existing = Set(favorites.items.map(\.itemRef))
-        return dragState.items
+        let result = dragState.items
             .filter { !existing.contains($0) }
             .compactMap {
                 FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
@@ -226,6 +226,10 @@ struct SidebarView: View {
                 else { return false }
                 return true
             }
+        #if DEBUG
+        SidebarDropDebug.log("items=\(dragState.items.map(\.path)) pending=\(result.map(\.path))")
+        #endif
+        return result
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -781,3 +785,17 @@ private struct DragSessionEndedCleaner: NSViewRepresentable {
     }
     .frame(width: 900, height: 560)
 }
+
+
+#if DEBUG
+enum SidebarDropDebug {
+    static func log(_ message: String) {
+        let line = "\(Date()) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let url = URL(fileURLWithPath: "/tmp/arbor-sidebar-debug.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else { try? data.write(to: url) }
+    }
+}
+#endif

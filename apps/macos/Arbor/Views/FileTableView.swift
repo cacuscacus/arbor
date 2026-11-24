@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
+    @State private var dropTargetRow: ItemRef?
     let entries: [FileEntry]
     @Binding var selection: Set<ItemRef>
     @Binding var sortOrder: [KeyPathComparator<FileEntry>]
@@ -60,6 +61,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 80, ideal: 120)
             }
@@ -71,6 +73,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 70, ideal: 90)
             }
@@ -81,6 +84,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 120, ideal: 160)
             }
@@ -91,6 +95,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 120, ideal: 160)
             }
@@ -103,6 +108,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .truncationMode(.middle)
                         .help(entry.relativePath(to: relativeRoot))
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 140, ideal: 220)
             }
@@ -115,6 +121,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .truncationMode(.middle)
                         .help(entry.fullPath)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 180, ideal: 280)
             }
@@ -127,6 +134,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                         .truncationMode(.middle)
                         .help(entry.id.parent?.path ?? entry.id.path)
                         .opacity(entry.listingOpacity)
+                        .modifier(DropRowHighlight(isTargeted: dropTargetRow == entry.id))
                 }
                 .width(min: 120, ideal: 200)
             }
@@ -153,6 +161,9 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
             dragState: dragState,
             resolveDestination: {
                 FileTableRowResolver.folder(under: NSEvent.mouseLocation, entries: entries)
+            },
+            onDropTargetChange: { target in
+                dropTargetRow = target
             },
             onTransfer: onTransfer
         )
@@ -267,6 +278,21 @@ struct FileIconImage: View {
     }
 }
 
+// MARK: - Row highlight
+
+/// Tints the whole row of the folder that would receive the drop.
+private struct DropRowHighlight: ViewModifier {
+    let isTargeted: Bool
+
+    func body(content: Content) -> some View {
+        content.background {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isTargeted ? Color.accentColor.opacity(0.16) : Color.clear)
+                .padding(.vertical, 1)
+        }
+    }
+}
+
 // MARK: - Drag / drop helpers
 
 /// Maps the pointer to a folder row so a drop anywhere on a folder's row moves
@@ -362,6 +388,7 @@ extension View {
         _ folder: ItemRef?,
         dragState: FileDragState,
         resolveDestination: (() -> ItemRef?)? = nil,
+        onDropTargetChange: ((ItemRef?) -> Void)? = nil,
         onTransfer: @escaping ([ItemRef], ItemRef, FileTransferOperation) -> Void
     ) -> some View {
         if let folder {
@@ -372,6 +399,7 @@ extension View {
                     dragState: dragState,
                     isTargeted: nil,
                     resolveDestination: resolveDestination,
+                    onDropTargetChange: onDropTargetChange,
                     onTransfer: onTransfer
                 )
             )
