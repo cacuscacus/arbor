@@ -38,6 +38,13 @@ enum WindowLaunchCoordinator {
 
     static func dequeueRoot(fallback: ItemRef? = nil) -> ItemRef {
         if pendingRoots.isEmpty {
+            // Test/automation hook: open a fixed folder when there is no
+            // restored session (used by the isolated debug build).
+            if let override = ProcessInfo.processInfo.environment["ARBOR_START_FOLDER"],
+               !override.isEmpty
+            {
+                return LocalFileLocation.item(for: URL(fileURLWithPath: override))
+            }
             return fallback ?? LocalFileLocation.item(
                 for: FileManager.default.homeDirectoryForCurrentUser
             )

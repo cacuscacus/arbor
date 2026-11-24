@@ -11,6 +11,15 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.4] — 2026-11-24
+
+### Fixed
+
+- **Dropping a file onto a folder's icon in icon view did nothing** (while dropping on its label worked). `NSImageView` registers itself as an image drag destination when an image is set; being the deepest view under the cursor it swallowed the drop, so AppKit validated it and never delivered `acceptDrop`. The icon view's dragged types are cleared whenever its image changes
+- **The icon grid jumped on the first click** (and could shift mid-drag). The chrome gap was implemented as a scroll-view content inset, which forces a negative resting origin; AppKit clamps that origin back to 0 when it reveals a selected item. The gap now comes from the flow layout's top section inset, so the resting origin is 0 and there is nothing to clamp
+- First row of the icon grid no longer slides under the floating toolbar when selected
+
+
 ## [1.7.3] — 2026-11-24
 
 ### Fixed
@@ -267,7 +276,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.4...HEAD
+[1.7.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.4
 [1.7.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.3
 [1.7.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.2
 [1.7.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.1
