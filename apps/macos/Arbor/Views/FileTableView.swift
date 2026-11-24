@@ -267,6 +267,11 @@ private func fileDragItemProvider(
     // Record the whole selection once so in-app drops can move it, but the
     // provider itself must describe this row only: SwiftUI creates one
     // dragging item per row and drops its provider's multiple URLs otherwise.
+    //
+    // Caveat: SwiftUI only asks for providers of rows it has realized, so a
+    // selection extending past the viewport can lose its off-screen rows on
+    // an external drop. The icon view builds its dragging items from the
+    // selection itself, so it always carries every selected file.
     _ = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
     guard let url = FileProviderRegistry.shared.intrinsicLocalURL(for: entry.id) else {
         return NSItemProvider()
