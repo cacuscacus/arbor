@@ -47,7 +47,11 @@ struct ScrollEdgeEffectEnabler: NSViewRepresentable {
                 scroll.hasVerticalScroller = true
                 scroll.autohidesScrollers = true
                 scroll.scrollerStyle = .overlay
-                scroll.automaticallyAdjustsContentInsets = true
+                // Do NOT force automatic content insets: a top inset puts the
+                // resting origin at -inset, and AppKit clamps it back to 0 when
+                // it reveals a selection — which scrolled list/icon content by
+                // the chrome height and made clicks land on another row.
+                // Views that need a chrome gap add it as content padding.
                 scroll.drawsBackground = false
                 scroll.contentView.drawsBackground = false
             }
