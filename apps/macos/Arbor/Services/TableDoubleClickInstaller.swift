@@ -4,22 +4,12 @@ import SwiftUI
 /// Hooks the detail file table for:
 /// - double-click → open
 /// - delayed second click on an already-selected name → rename
-/// - keeping the clip-view origin stable across selection (see below)
 ///
 /// On macOS 26 SwiftUI's `Table` is backed by `SwiftUIOutlineTableView` (an
 /// `NSOutlineView` subclass), so outline views are valid detail tables. The
 /// sidebar is an outline view too; the installer lives in the detail pane and
-/// picks the table whose frame matches it, so the sidebar is never hooked.
-///
-/// Scroll / selection jump: the table's clip view uses `contentInsets.top=28`
-/// for the column header, so the resting origin at scroll-top is `-28`. AppKit
-/// clamps that origin to `0` when it reveals a selected row, which scrolls the
-/// list by a header height, slides the first rows under the titles, and moves
-/// the row under the cursor. We capture the origin on mouse-down and restore it
-/// after selection (sync + async), matching the icon-view fix from 1.7.3.
-/// Chrome under the toolbar is layout padding on the SwiftUI `Table`, not a
-/// scroll-view content inset — those insets put the resting origin at `-80`
-/// and the clamp scrolled ~3 rows.
+/// picks the table whose frame and view subtree match it, so the sidebar and
+/// inactive tabs are never hooked.
 struct TableInteractionInstaller: NSViewRepresentable {
     var rowCount: Int
     var nameColumnIndex: Int = 0
@@ -60,9 +50,8 @@ struct TableInteractionInstaller: NSViewRepresentable {
         var rowCount: Int = 0
         var nameColumnIndex: Int = 0
 
-        /// Clip-view origin at mouse-down; restored after AppKit's selection reveal.
-        var originBeforeClick: NSPoint?
-        /// Row under the pointer at mouse-down — used when `clickedRow` is -1.
+        /// Row under the pointer at mouse-down — fallback when SwiftUI resets
+        /// `clickedRow` to -1 before `doubleAction` fires.
         var rowBeforeClick: Int = -1
 
         private var renameWorkItem: DispatchWorkItem?
@@ -84,98 +73,39 @@ struct TableInteractionInstaller: NSViewRepresentable {
             hookedTable = table
         }
 
-        func captureClickGeometry(in table: NSTableView, event: NSEvent) {
-            guard let scroll = table.enclosingScrollView else { return }
-            let clip = scroll.contentView
-            originBeforeClick = clip.bounds.origin
+        func captureMouseDown(in table: NSTableView, event: NSEvent) {
             let point = table.convert(event.locationInWindow, from: nil)
-            rowBeforeClick = table.row(at: point)
-            DragDebugLog.log(
-                "table.mouseDown row=\(rowBeforeClick)"
-                    + " origin.y=\(clip.bounds.origin.y)"
-                    + " scrollInsets.top=\(scroll.contentInsets.top)"
-                    + " clipInsets.top=\(clip.contentInsets.top)"
-            )
-        }
-
-        /// Undo AppKit clamping the clip origin to 0 when revealing selection.
-        ///
-        /// Restoring the origin stops the visual jump, but AppKit has already
-        /// moved the selection to the row that sat under the pointer *after* the
-        /// clamp. Put the selection back on the row the user actually pressed.
-        func restoreOriginAfterSelectionIfNeeded() {
-            guard let before = originBeforeClick,
-                  let table = hookedTable,
-                  let scroll = table.enclosingScrollView
-            else { return }
-            let clip = scroll.contentView
-            let current = clip.bounds.origin
-            guard abs(current.y - before.y) > 0.5 || abs(current.x - before.x) > 0.5 else {
+            guard table.bounds.contains(point) else {
+                rowBeforeClick = -1
                 return
             }
-            DragDebugLog.log("table.restore.origin from=\(current.y) to=\(before.y)")
-            clip.setBoundsOrigin(before)
-            scroll.reflectScrolledClipView(clip)
-            fixSelectionAfterClamp(in: table)
-        }
-
-        /// The clamp changed which row is under the pointer, so AppKit selected
-        /// a different row than the one pressed. Re-select the pressed row.
-        /// Only for a plain click: keep modifier-driven multi-selection intact.
-        private func fixSelectionAfterClamp(in table: NSTableView) {
-            guard rowBeforeClick >= 0,
-                  rowBeforeClick < rowCount,
-                  NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty,
-                  table.selectedRow != rowBeforeClick
-            else { return }
-            DragDebugLog.log(
-                "table.selection.fix from=\(table.selectedRow) to=\(rowBeforeClick)"
-            )
-            table.selectRowIndexes(
-                IndexSet(integer: rowBeforeClick),
-                byExtendingSelection: false
-            )
-        }
-
-        /// AppKit often clamps *after* our action runs — restore now and on the
-        /// next turns. Keep `originBeforeClick` until the next mouse-down so a
-        /// double-click's second press can reuse / refresh the capture.
-        func restoreOriginGuarded() {
-            restoreOriginAfterSelectionIfNeeded()
-            DispatchQueue.main.async { [weak self] in
-                self?.restoreOriginAfterSelectionIfNeeded()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.restoreOriginAfterSelectionIfNeeded()
-            }
-        }
-
-        @objc func tableClicked(_ sender: Any?) {
-            guard let table = sender as? NSTableView else { return }
-            restoreOriginAfterSelectionIfNeeded()
-
-            var row = table.clickedRow
-            let column = table.clickedColumn
-            if rowBeforeClick >= 0,
-               NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty,
-               rowBeforeClick != row
-            {
-                // clickedRow reflects the post-clamp layout; the pressed row is
-                // what the user aimed at.
-                row = rowBeforeClick
-            } else if row < 0, rowBeforeClick >= 0 {
-                row = rowBeforeClick
-            }
+            rowBeforeClick = table.row(at: point)
             if let scroll = table.enclosingScrollView {
                 let clip = scroll.contentView
                 DragDebugLog.log(
-                    "table.clicked row=\(row) col=\(column)"
+                    "table.mouseDown row=\(rowBeforeClick)"
                         + " origin.y=\(clip.bounds.origin.y)"
                         + " scrollInsets.top=\(scroll.contentInsets.top)"
                         + " clipInsets.top=\(clip.contentInsets.top)"
                 )
             }
-            restoreOriginGuarded()
+        }
+
+        @objc func tableClicked(_ sender: Any?) {
+            guard let table = sender as? NSTableView else { return }
+
+            let rawRow = table.clickedRow
+            let row = rawRow >= 0 ? rawRow : rowBeforeClick
+            let column = table.clickedColumn
+            if let scroll = table.enclosingScrollView {
+                let clip = scroll.contentView
+                DragDebugLog.log(
+                    "table.clicked row=\(row) rawRow=\(rawRow) selected=\(table.selectedRow) col=\(column)"
+                        + " origin.y=\(clip.bounds.origin.y)"
+                        + " scrollInsets.top=\(scroll.contentInsets.top)"
+                        + " clipInsets.top=\(clip.contentInsets.top)"
+                )
+            }
 
             guard row >= 0, row < rowCount else {
                 cancelPendingRename()
@@ -211,11 +141,9 @@ struct TableInteractionInstaller: NSViewRepresentable {
         @objc func tableDoubleClicked(_ sender: Any?) {
             cancelPendingRename()
             guard let table = sender as? NSTableView else { return }
-            // Undo any clamp before resolving the row from the event location.
-            restoreOriginAfterSelectionIfNeeded()
 
-            // `clickedRow` is -1 here for SwiftUI's table (the double-click is
-            // dispatched after SwiftUI resets it); resolve from the event, then
+            // `clickedRow` is sometimes -1 here for SwiftUI's table (the double-click
+            // is dispatched after SwiftUI resets it); resolve from the event, then
             // fall back to the row captured on mouse-down.
             let rawClicked = table.clickedRow
             let row: Int
@@ -227,8 +155,8 @@ struct TableInteractionInstaller: NSViewRepresentable {
             } else {
                 row = rowBeforeClick
             }
-            DragDebugLog.log("table.doubleClick rawClicked=\(rawClicked) resolved=\(row)")
-            restoreOriginGuarded()
+            let originY = table.enclosingScrollView?.contentView.bounds.origin.y ?? 0
+            DragDebugLog.log("table.doubleClick rawClicked=\(rawClicked) resolved=\(row) origin.y=\(originY)")
             guard row >= 0, row < rowCount else { return }
             onDoubleClickRow(row)
         }
@@ -306,10 +234,11 @@ struct TableInteractionInstaller: NSViewRepresentable {
         }
 
         private func handleMouseDown(_ event: NSEvent) {
-            guard let table = hookedTable, table.window === event.window else { return }
-            let pointInTable = table.convert(event.locationInWindow, from: nil)
-            guard table.bounds.contains(pointInTable) else { return }
-            coordinator?.captureClickGeometry(in: table, event: event)
+            guard let table = hookedTable,
+                  table.window === event.window,
+                  Self.isEffectivelyVisible(table)
+            else { return }
+            coordinator?.captureMouseDown(in: table, event: event)
         }
 
         private func tryInstall() {
@@ -343,18 +272,10 @@ struct TableInteractionInstaller: NSViewRepresentable {
             table.doubleAction = #selector(Coordinator.tableDoubleClicked(_:))
             table.focusRingType = .none
 
-            // No safe-area content inset on the table's scroll view: with an
-            // inset its resting origin is negative (-80 observed) and AppKit
-            // clamps it to 0 when revealing the selected row, scrolling the
-            // list by the chrome height. The chrome gap is padding above.
             if let scroll = table.enclosingScrollView {
-                scroll.automaticallyAdjustsContentInsets = false
-                if scroll.contentInsets.top != 0 || scroll.contentInsets.bottom != 0 {
-                    scroll.contentInsets = NSEdgeInsets()
-                }
-                // Do NOT touch scroll.contentView.contentInsets: NSTableView uses
-                // it to reserve the header height (28pt); zeroing it drew the
-                // first row underneath the column titles.
+                // Leave scroll/clip content insets to SwiftUI + AppKit so the
+                // table sits right below the toolbar (no extra padding gap) and
+                // keeps its 28pt column-header clip inset.
                 let clip = scroll.contentView
                 let key =
                     "\(scroll.automaticallyAdjustsContentInsets)|\(scroll.contentInsets.top)"
@@ -373,14 +294,38 @@ struct TableInteractionInstaller: NSViewRepresentable {
 
         /// The table lives in a sibling subtree of this SwiftUI background view,
         /// so walking superviews (and stopping at NSSplitView) never found it.
-        /// Search the window instead and pick the table whose frame matches this
-        /// pane — split view has two tables and each installer must hook its own.
+        /// Search the window and pick the table that shares the closest ancestor
+        /// with this installer (so split panes and mounted background tabs each
+        /// hook their own table) and overlaps this pane's frame.
         private func findDetailFileTable() -> NSTableView? {
             guard let window, let root = window.contentView else { return nil }
             let targetFrame = convert(bounds, to: nil)
             guard targetFrame.width > 1, targetFrame.height > 1 else { return nil }
 
-            var best: (table: NSTableView, overlap: CGFloat, distance: CGFloat)?
+            var ancestorSteps: [ObjectIdentifier: Int] = [:]
+            var cursor: NSView? = self
+            var depth = 0
+            while let node = cursor {
+                ancestorSteps[ObjectIdentifier(node)] = depth
+                depth += 1
+                cursor = node.superview
+            }
+
+            func treeDistance(to table: NSTableView) -> Int {
+                var node: NSView? = table
+                var steps = 0
+                while let current = node {
+                    if let selfSteps = ancestorSteps[ObjectIdentifier(current)] {
+                        return selfSteps + steps
+                    }
+                    steps += 1
+                    node = current.superview
+                }
+                return Int.max
+            }
+
+            let selfVisible = Self.isEffectivelyVisible(self)
+            var best: (table: NSTableView, visibilityMatch: Bool, treeDist: Int, overlap: CGFloat, distance: CGFloat)?
 
             func consider(_ table: NSTableView) {
                 guard table.window === window, !table.isHiddenOrHasHiddenAncestor else { return }
@@ -388,15 +333,27 @@ struct TableInteractionInstaller: NSViewRepresentable {
                 let intersection = frame.intersection(targetFrame)
                 let overlap = intersection.isNull ? 0 : intersection.width * intersection.height
                 guard overlap > 0 else { return }
+
+                let visibilityMatch = Self.isEffectivelyVisible(table) == selfVisible
+                let tDist = treeDistance(to: table)
                 let distance = hypot(frame.midX - targetFrame.midX, frame.midY - targetFrame.midY)
+
                 if let current = best {
-                    if overlap > current.overlap
-                        || (overlap == current.overlap && distance < current.distance)
-                    {
-                        best = (table, overlap, distance)
+                    let isBetter: Bool
+                    if visibilityMatch != current.visibilityMatch {
+                        isBetter = visibilityMatch
+                    } else if tDist != current.treeDist {
+                        isBetter = tDist < current.treeDist
+                    } else if overlap != current.overlap {
+                        isBetter = overlap > current.overlap
+                    } else {
+                        isBetter = distance < current.distance
+                    }
+                    if isBetter {
+                        best = (table, visibilityMatch, tDist, overlap, distance)
                     }
                 } else {
-                    best = (table, overlap, distance)
+                    best = (table, visibilityMatch, tDist, overlap, distance)
                 }
             }
 
@@ -411,6 +368,18 @@ struct TableInteractionInstaller: NSViewRepresentable {
 
             visit(root)
             return best?.table
+        }
+
+        /// Distinguishes the active tab from background tabs kept mounted with `.opacity(0)`.
+        private static func isEffectivelyVisible(_ view: NSView) -> Bool {
+            guard !view.isHiddenOrHasHiddenAncestor else { return false }
+            var current: NSView? = view
+            while let node = current {
+                if node.alphaValue <= 0.01 { return false }
+                if let layer = node.layer, layer.opacity <= 0.01 { return false }
+                current = node.superview
+            }
+            return true
         }
     }
 }

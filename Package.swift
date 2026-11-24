@@ -23,6 +23,7 @@ let package = Package(
                 "FileDragPayload.swift",
                 "PasteDestinationResolver.swift",
                 "SidebarDropRouting.swift",
+                "DragAutoScrollController.swift",
             ]
         ),
         .testTarget(

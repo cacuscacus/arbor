@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.8] — 2026-11-24
+
+### Fixed
+
+- **List view jumped and selected another row while clicking.** The real cause was our own drag-autoscroll controller: it treated macOS's `.drag` pasteboard as "a drag is in progress" (it is never emptied after a drag), and started a 60 Hz timer on every `leftMouseDown` inside `RunLoop.Mode.common` — the same mode the table's tracking loop uses. The timer ticked during a normal 60–150 ms click and scrolled the list. Its step math also clamped the scroll origin to `0` instead of `-topInset`, which pushed the resting table under the column header. Drag autoscroll now has an explicit session lifecycle (`beginDragSession` / `noteDropHover` / `endDragSession`) and pure, tested math (`DragAutoScrollMath`)
+- **Empty band above the list / column headers covered by the tab bar.** The manual `.padding(.top, 52)` and zeroed content insets from 1.7.5–1.7.7 are gone: the table uses the native safe-area inset again. With two or more tabs the tab bar is a `safeAreaInset` (AppKit adds its height to the inset) instead of an overlay covering the headers
+- **Icon view opened scrolled and with inconsistent top padding.** The flow layout starts with the real toolbar height (never a temporary `16pt`), ignores transient sub-pixel chrome measurements, and resets the scroll to the top when the current folder changes
+- Double-click resolves the pressed row from the mouse-down capture, since `clickedRow` is `-1` for SwiftUI's table
+
+
 ## [1.7.7] — 2026-11-24
 
 ### Fixed
@@ -294,7 +304,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.7...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.8...HEAD
+[1.7.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.8
 [1.7.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.7
 [1.7.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.6
 [1.7.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.4

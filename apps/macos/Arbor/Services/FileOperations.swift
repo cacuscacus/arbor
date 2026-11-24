@@ -455,21 +455,25 @@ struct FolderDropDelegate: DropDelegate {
     func dropEntered(info: DropInfo) {
         isTargeted?.wrappedValue = true
         onDropTargetChange?(resolveDestination?() ?? destination)
+        DragAutoScrollController.shared.noteDropHover()
     }
 
     func dropExited(info: DropInfo) {
         isTargeted?.wrappedValue = false
         onDropTargetChange?(nil)
+        DragAutoScrollController.shared.noteDropExited()
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         onDropTargetChange?(resolveDestination?() ?? destination)
+        DragAutoScrollController.shared.noteDropHover()
         return DropProposal(operation: FileTransferOperation.fromModifierFlags.dropOperation)
     }
 
     func performDrop(info: DropInfo) -> Bool {
         isTargeted?.wrappedValue = false
         onDropTargetChange?(nil)
+        DragAutoScrollController.shared.endDragSession()
         let operation = FileTransferOperation.fromModifierFlags
         let destination = effectiveDestination
         DragDebugLog.log("drop.perform destination=\(destination.path) pane=\(self.destination.path) items=\(dragState.items.count)")

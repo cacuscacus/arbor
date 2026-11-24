@@ -59,3 +59,6 @@ plugins/**/target/
 # SwiftPM (pure-logic test package)
 .build/
 .swiftpm/
+
+# Local agent notes / debugging learnings (never committed)
+docs/local/

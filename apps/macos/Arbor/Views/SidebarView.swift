@@ -455,6 +455,7 @@ private struct SidebarDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        DragAutoScrollController.shared.noteDropHover()
         withAnimation(animation) {
             dropTargetIndex = index
         }
@@ -467,6 +468,7 @@ private struct SidebarDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        DragAutoScrollController.shared.endDragSession()
         // Capture before any cleaner / async work can wipe state.
         let favoriteID = draggingFavoriteID
         let fileItems = dragState.items
@@ -618,6 +620,7 @@ private struct SidebarFavoriteDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        DragAutoScrollController.shared.noteDropHover()
         if decision(info) == .transferFiles, transferTargetID == destination.id {
             return DropProposal(operation: FileTransferOperation.fromModifierFlags.dropOperation)
         }
@@ -625,6 +628,7 @@ private struct SidebarFavoriteDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        DragAutoScrollController.shared.endDragSession()
         if decision(info) == .transferFiles {
             transferTargetID = nil
             let operation = FileTransferOperation.fromModifierFlags
@@ -690,10 +694,12 @@ private struct SidebarSectionFileDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .copy)
+        DragAutoScrollController.shared.noteDropHover()
+        return DropProposal(operation: .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        DragAutoScrollController.shared.endDragSession()
         // Honor the live preview index — previously this always appended.
         let committedIndex = dropTargetIndex ?? favorites.items.count
         let items = dragState.items

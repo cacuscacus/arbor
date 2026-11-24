@@ -20,6 +20,7 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
     var onQuickLook: (() -> Void)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
+    @Environment(\.hasFloatingTabBar) private var hasFloatingTabBar
 
     func makeCoordinator() -> IconCollectionCoordinator {
         IconCollectionCoordinator()
@@ -38,16 +39,15 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
-        // No scroll-view content insets: a top inset forces a negative resting
-        // origin so content can slide under the floating chrome, and AppKit
-        // clamps that origin back to 0 whenever it reveals a selected item,
-        // which moved the grid by the chrome height on the first click. The gap
-        // lives in the layout's section inset instead (origin stays 0).
+        // Keep the scroll view's resting origin at 0 and express the top chrome
+        // clearance in the flow layout's sectionInset (avoids late AppKit
+        // safe-area inset shifts on mount).
         scroll.automaticallyAdjustsContentInsets = false
         scroll.contentInsets = NSEdgeInsets()
 
         let collection = IconCollectionNSView()
         collection.eventHandler = coordinator
+        collection.extraTopChrome = hasFloatingTabBar ? 42 : 0
         collection.isSelectable = true
         collection.allowsMultipleSelection = true
         collection.allowsEmptySelection = true
@@ -61,7 +61,16 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
 
         let layout = NSCollectionViewFlowLayout()
         layout.scrollDirection = .vertical
-        layout.sectionInset = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        // Start with the standard toolbar chrome gap (52pt + 16pt padding + optional
+        // tab bar) so the very first layout/reloadData already places row 0 below
+        // the chrome. Starting at 16pt caused fast-loading folders to keep cached
+        // frames at y=16 even after `applyTopSpacer()` updated `sectionInset`.
+        layout.sectionInset = NSEdgeInsets(
+            top: 68 + collection.extraTopChrome,
+            left: 16,
+            bottom: 16,
+            right: 16
+        )
         collection.collectionViewLayout = layout
         collection.dataSource = coordinator
         collection.delegate = coordinator
@@ -82,6 +91,7 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
             // Defend against SwiftUI recreating the document view without our register call.
             collection.register(IconCollectionItem.self, forItemWithIdentifier: IconCollectionItem.identifier)
             collection.eventHandler = coordinator
+            collection.extraTopChrome = hasFloatingTabBar ? 42 : 0
             coordinator.collectionView = collection
         }
         coordinator.applyMetrics()
@@ -101,6 +111,8 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     private var indexByItem: [ItemRef: Int] = [:]
     private var isApplyingSelection = false
     private var lastMetrics: IconViewMetrics?
+    private var lastFolder: ItemRef?
+    private var pendingScrollToTop = false
 
     private var getSelection: (() -> Set<ItemRef>) = { [] }
     private var setSelection: ((Set<ItemRef>) -> Void) = { _ in }
@@ -136,6 +148,12 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         onTransfer = parent.onTransfer
         onDeleteSelection = parent.onDeleteSelection
         onQuickLook = parent.onQuickLook
+        if currentFolder != parent.currentFolder {
+            if lastFolder != nil {
+                pendingScrollToTop = true
+            }
+            lastFolder = parent.currentFolder
+        }
         currentFolder = parent.currentFolder
         renamingItem = parent.renamingItem
         makeItemMenu = { AnyView(parent.contextMenu($0)) }
@@ -181,6 +199,17 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             }
             applySelectionIndexPaths(valid)
         }
+        if pendingScrollToTop {
+            pendingScrollToTop = false
+            scrollToTop()
+        }
+    }
+
+    private func scrollToTop() {
+        guard let scroll = collectionView?.enclosingScrollView else { return }
+        let topY = scroll.automaticallyAdjustsContentInsets ? -scroll.contentInsets.top : 0
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: topY))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     func syncSelection(_ selection: Set<ItemRef>) {
@@ -393,6 +422,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     ) -> NSDragOperation {
         // AppKit proposes `.before` when the pointer is over a cell's padding;
         // resolve the cell ourselves so the whole icon+label area accepts drops.
+        DragAutoScrollController.shared.noteDropHover(in: collectionView.enclosingScrollView)
         let point = collectionView.convert(draggingInfo.draggingLocation, from: nil)
         var index = proposedDropIndexPath.pointee.item
         DragDebugLog.log("icon.validate point=\(point) proposed=\(index) itemAt=\(String(describing: collectionView.indexPathForItem(at: point)?.item)) frame=\(String(describing: collectionView.layoutAttributesForItem(at: IndexPath(item: max(0, index), section: 0))?.frame))")
@@ -426,6 +456,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         draggingExited sender: NSDraggingInfo?
     ) {
         setDropTargetIndex(nil, in: collectionView)
+        DragAutoScrollController.shared.noteDropExited()
     }
 
     func collectionView(
@@ -433,6 +464,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         draggingEnded sender: NSDraggingInfo
     ) {
         setDropTargetIndex(nil, in: collectionView)
+        DragAutoScrollController.shared.endDragSession()
     }
 
     func collectionView(
@@ -443,6 +475,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     ) -> Bool {
         DragDebugLog.log("icon.accept.enter index=\(indexPath.item) op=\(dropOperation == .on ? "on" : "before") count=\(entries.count)")
         setDropTargetIndex(nil, in: collectionView)
+        DragAutoScrollController.shared.endDragSession()
         guard dropOperation == .on,
               entries.indices.contains(indexPath.item),
               entries[indexPath.item].isBrowsable
@@ -482,8 +515,14 @@ protocol IconCollectionEventHandling: AnyObject {
 final class IconCollectionNSView: NSCollectionView {
     weak var eventHandler: IconCollectionEventHandling?
 
-    /// Last top inset AppKit applied (safe area under the floating chrome).
-    private var lastTopInset: CGFloat = 0
+    /// Extra top clearance when the floating multi-tab pill bar is visible.
+    var extraTopChrome: CGFloat = 0 {
+        didSet {
+            if abs(extraTopChrome - oldValue) > 0.5 {
+                applyTopSpacer()
+            }
+        }
+    }
 
     private var marqueeStart: CGPoint?
     private var marqueeLayer: CAShapeLayer?
@@ -501,17 +540,18 @@ final class IconCollectionNSView: NSCollectionView {
     }
 
     /// Flows the grid below the window's floating chrome by adding its height to
-    /// the flow layout's top section inset. Content padding, not a scroll inset:
-    /// the resting origin stays 0, so AppKit has nothing to clamp when it
-    /// reveals a selected item.
+    /// the flow layout's top section inset (keeping origin at 0 and avoiding late
+    /// AppKit safe-area shifts on mount).
     private func applyTopSpacer() {
         guard let window,
               let layout = collectionViewLayout as? NSCollectionViewFlowLayout
         else { return }
-        let chrome = window.contentView.map {
+        let measuredChrome = window.contentView.map {
             max(0, $0.bounds.height - window.contentLayoutRect.height)
         } ?? 52
-        let top = 16 + min(chrome, 80)
+        // Ignore transient 0 measurements while the window is still mounting.
+        let chrome = measuredChrome > 1 ? measuredChrome : 52
+        let top = 16 + min(chrome, 80) + extraTopChrome
         if abs(layout.sectionInset.top - top) > 0.5 {
             layout.sectionInset = NSEdgeInsets(
                 top: top,
@@ -520,6 +560,7 @@ final class IconCollectionNSView: NSCollectionView {
                 right: layout.sectionInset.right
             )
             layout.invalidateLayout()
+            needsLayout = true
             DragDebugLog.log("spacer.top=\(top) origin=\(enclosingScrollView?.contentView.bounds.origin ?? .zero)")
         }
     }
@@ -940,6 +981,7 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
             frame: iconView.frame,
             contents: iconView.image
         )
+        DragAutoScrollController.shared.beginDragSession(in: collectionView?.enclosingScrollView)
         view.beginDraggingSession(with: draggingItems, event: event, source: self)
     }
 
@@ -948,6 +990,7 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        DragAutoScrollController.shared.endDragSession()
         actions?.endDrag()
     }
 

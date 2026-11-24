@@ -173,10 +173,20 @@ struct ContentView: View {
                     .zIndex(active ? 1 : 0)
                 }
             }
-            // Overlay (not a layout sibling) so folder icons *and* the HSplitView
-            // divider sit under the glass island — same scroll-under feel as Finder.
+            .environment(\.hasFloatingTabBar, tabs.count > 1)
+            // When 2+ tabs are open, reserve the tab bar via safe-area inset so
+            // table headers rest cleanly below the glass pill while scrolled rows
+            // still pass underneath. With 1 tab only the trailing `+` floats, so
+            // the listing starts right below the toolbar with zero wasted gap.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if tabs.count > 1 {
+                    detailTabChrome
+                }
+            }
             .overlay(alignment: .top) {
-                detailTabChrome
+                if tabs.count == 1 {
+                    detailTabChrome
+                }
             }
         }
         // Automatic style picks up Liquid Glass sidebar on Tahoe.
@@ -701,4 +711,15 @@ private struct TabBarItem: View {
 
 #Preview {
     ContentView(rootDirectory: FileManager.default.homeDirectoryForCurrentUser)
+}
+
+private struct HasFloatingTabBarKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var hasFloatingTabBar: Bool {
+        get { self[HasFloatingTabBarKey.self] }
+        set { self[HasFloatingTabBarKey.self] = newValue }
+    }
 }
