@@ -11,56 +11,37 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
-### Fixed
-
-- **Dropping files on the breadcrumb path bar**: only the text of a crumb was a
-  drop target, so the separators and gaps between crumbs were dead zones and
-  drops "did nothing". Each crumb now owns the separator to its right, has a
-  taller hit area, and highlights while hovered; dropping on a separator moves
-  up into that ancestor. Moves land in the pane's undo stack (⌘Z).
+## [1.7.0] — 2026-11-24
 
 ### Added
 
-- **Cut and paste for moving files**: ⌘X remembers the selection and ⌘V moves it into the selected folder (or the one being browsed), with context-menu entries and ⌘Z undo
-- **Session backup**: the previous `session.json` is kept as `session.previous.json` and used when the live file is missing or unreadable, so a window's tabs survive a corrupt or overwritten session
-- **Continuous drag autoscroll**: dragging to the edge of a list now keeps scrolling (and accelerates), so a file can be dragged across a long folder and dropped on a folder far away
+- **Interactive SSH auth**: passwords and key passphrases prompt a secure in-app sheet through an OpenSSH askpass bridge; secrets can be remembered in the Keychain and are answered automatically afterwards (entries are only readable by Arbor)
+- **Per-profile identity file** (`identityFile`, like `ssh -i`) with `IdentitiesOnly`
+- **Host-key rotation flow**: when a recorded host key changes, the verification sheet shows the recorded and offered fingerprints with an explicit **Replace and Connect** action (`ssh-keygen -R` + re-trust)
+- **Recursive delete for SSH locations**: folders delete bottom-up over SFTP, and the Delete key routes to the permanent-delete confirmation when a provider has no Trash
+- **Cut and paste for moving files**: ⌘X remembers the selection and ⌘V moves it into the selected folder (or the one being browsed), with context-menu entries and undo
+- **Continuous drag autoscroll**: dragging to the edge of a list keeps scrolling and accelerates, so a file can travel across a long folder and be dropped on a folder far away
+- **Session backup**: the previous `session.json` is kept as `session.previous.json` and used when the live file is missing or unreadable
 
 ### Fixed
 
-- **Dropping files on a sidebar favorite did nothing**: favorites only handled reordering. Dropping files on a favorite folder now moves them into it (⌥ copies), highlights the row, and records the move in the pane's undo stack; pinning a folder still works from the gaps between rows
-- **Dropping on a folder row only worked over the Name column**: Kind/Size/Date drops fell through and were treated as a drop on the current folder (a no-op). The row under the pointer is now resolved at drop time
-- Drag autoscroll stalled after a small scroll and never reached the top of the list because the visible edge sits under the breadcrumb chrome
-
-### Fixed
-
-- **Drag and drop delivered the wrong files**: dragging a multi-selection handed every dragged item the *same* file, and a single file lost its name (browsers invented one). Each row's `NSItemProvider` now describes only its own file, carries `suggestedName`, and no longer exposes the file's contents as a second representation (which is what made WebKit build a nameless `File`). Verified against a real drag pasteboard: one item per selected file, distinct URLs, names attached.
-- Icon-view drags now share the same payload builder (one pasteboard item per file, plus the legacy `NSFilenamesPboardType` list).
-
-### Added
-
-- **Interactive SSH auth**: passwords and key passphrases prompt a secure in-app sheet via an OpenSSH askpass bridge; secrets can be **remembered in the Keychain** and are then answered automatically (entries are only readable by Arbor)
-- **Per-profile identity file** (`identityFile`, like `ssh -i`) with `IdentitiesOnly`, configurable in the SSH location JSON
-- **Host-key rotation flow**: when a recorded host key changes, the verification sheet now shows recorded vs. offered fingerprints with an explicit **Replace and Connect** action (`ssh-keygen -R` + re-trust), instead of a dead end
-- **Recursive delete for SSH locations**: folders delete bottom-up over SFTP; the Delete key routes to the permanent-delete confirmation when a provider has no Trash
-
-### Fixed
-
-- **SSH transport hang on macOS 26**: `FileHandle.read(upToCount:)` never returns on a live pipe (even `/bin/cat` hangs); the transport and askpass bridge now use `availableData`. SSH connections never completed before this
+- **Drag and drop delivered the wrong files**: a multi-selection handed every dragged item the same file, and single files lost their name (browsers invented one). Each row's `NSItemProvider` now describes only its own file, carries `suggestedName`, and no longer exposes the file's contents, which is what made WebKit drop handlers build a nameless file
+- **Dropping files on a sidebar favorite did nothing**: favorites only understood reordering. Dropping on a favorite folder now moves the files into it (⌥ copies), highlights the row, and records the move in the pane's undo stack
+- **Dropping on a folder row only worked over the Name column**: Kind/Size/Date drops fell through and were treated as a drop on the current folder. The row under the pointer is resolved at drop time
+- **Breadcrumb drops were unreliable**: only the text of a crumb was a target, so separators and gaps were dead zones. Each crumb now owns the separator on its right, highlights while hovered, and accepts drops across its full height
+- Drag autoscroll stalled after a small scroll and could not reach the top of the list because the visible edge sits under the breadcrumb chrome
+- **SSH transport hang on macOS 26**: `FileHandle.read(upToCount:)` never returns on a live pipe (reproducible with `/bin/cat`); the transport and askpass bridge now use `availableData`. SSH connections never completed before this
 - The SFTP helper replaced the `openssh` crate (which hardcodes `BatchMode=yes`) with a direct `ssh -s <host> sftp` spawn, so interactive auth works and stderr diagnostics still reach the app's error classification
-- Helper environment now inherits the full app environment (agent socket included) instead of replacing it
-- Repeated SSH retries no longer deadlock askpass prompts behind one another (per-connection threads + queued prompt presentation)
-
-### Fixed
-
-- Quick Look: panel data source no longer routes through `MainActor.assumeIsolated` (lock-protected storage instead), the arrow-key sync matches by URL so mixed/remote listings select the right row, and the index-change callback is released when the panel closes
-- Document preview: the local-asset scheme handler is now fully thread-safe (`vendorCache` behind a lock, document root bound explicitly) with no main-actor assumption
+- The helper now inherits the full app environment (agent socket included) instead of replacing it, and repeated SSH retries no longer deadlock askpass prompts behind one another
+- Quick Look: the panel data source no longer routes through `MainActor.assumeIsolated` (lock-protected storage instead), arrow-key sync matches by URL so mixed and remote listings select the right row, and the index callback is released when the panel closes
+- Document preview: the local-asset scheme handler is fully thread-safe (`vendorCache` behind a lock, document root bound explicitly) with no main-actor assumption
 - Eliminated all build warnings (concurrency isolation in `MarkdownHTMLRenderer`, `DocumentPreviewController`, `ContentView`)
 
 ### Changed
 
-- `BreadcrumbBar` extracted from `FileBrowserView` into its own file; `FilenameSearchPattern` extracted from `SearchService`
-- Pure Foundation logic (Markdown renderer, source-language detection, Go to Folder resolver, search pattern) now has 47 SPM unit tests running in CI via a new `swift test` job
-
+- **Architecture documented honestly**: Swift is the macOS core and Rust ships only as stdio sidecars (`arbor-sftp-helper`); `arbor-core` and `arbor-ffi` are not linked into the app. README, ROADMAP, CONTRIBUTING and ARCHITECTURE follow the code
+- `BreadcrumbBar` extracted from `FileBrowserView`, `FilenameSearchPattern` from `SearchService`, and drag payloads centralized in `FileDragPayload`
+- Pure-logic coverage grew from 47 to 63 SPM tests (drag payloads, paste destinations, sidebar drop routing) running in CI via `swift test`
 ## [1.6.1] — 2026-11-13
 
 ### Added
@@ -258,7 +239,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.0
 [1.6.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.1
 [1.6.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.0
 [1.5.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.5.0
