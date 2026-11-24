@@ -11,6 +11,14 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dropping files on the breadcrumb path bar**: only the text of a crumb was a
+  drop target, so the separators and gaps between crumbs were dead zones and
+  drops "did nothing". Each crumb now owns the separator to its right, has a
+  taller hit area, and highlights while hovered; dropping on a separator moves
+  up into that ancestor. Moves land in the pane's undo stack (⌘Z).
+
 ### Added
 
 - **Cut and paste for moving files**: ⌘X remembers the selection and ⌘V moves it into the selected folder (or the one being browsed), with context-menu entries and ⌘Z undo

@@ -3,13 +3,17 @@ import UniformTypeIdentifiers
 
 /// Finder-style path breadcrumbs shown under the file listing.
 ///
-/// Each crumb navigates on click, accepts drops (via `FolderDropDelegate`),
-/// and resolves the volume root to the location's display name.
+/// Each crumb navigates on click and accepts file drops (via
+/// `FolderDropDelegate`). The drop target covers the crumb *and* the chevron
+/// leading up to it, so the gaps in the bar are not dead zones — dropping on a
+/// separator moves into the folder on its right, like Finder.
 struct BreadcrumbBar: View {
     let directory: ItemRef
     var dragState: FileDragState = FileDragState()
     var onNavigate: (ItemRef) -> Void
     var onTransfer: (([ItemRef], ItemRef, FileTransferOperation) -> Void)? = nil
+
+    @State private var targetedIndex: Int?
 
     private var crumbs: [(name: String, item: ItemRef)] {
         var result: [(String, ItemRef)] = []
@@ -37,46 +41,81 @@ struct BreadcrumbBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
-                    if index > 0 {
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+                    HStack(spacing: 4) {
+                        Button {
+                            onNavigate(crumb.item)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(nsImage: FileIcon.image(for: crumb.item, size: 14))
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .frame(width: 14, height: 14)
+                                Text(crumb.name)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
+                        .help(crumb.item.path)
 
-                    Button {
-                        onNavigate(crumb.item)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(nsImage: FileIcon.image(for: crumb.item, size: 14))
-                                .resizable()
-                                .interpolation(.high)
-                                .frame(width: 14, height: 14)
-                            Text(crumb.name)
-                                .lineLimit(1)
+                        // The separator belongs to the crumb on its left: dropping
+                        // on it moves up into that ancestor, which is what the
+                        // gesture means when you drag from a deep folder.
+                        if index < crumbs.count - 1 {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
-                    .help(crumb.item.path)
+                    .padding(.horizontal, 3)
+                    .frame(height: 22)
+                    .contentShape(Rectangle())
+                    .background {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(
+                                targetedIndex == index
+                                    ? Color.accentColor.opacity(0.2)
+                                    : Color.clear
+                            )
+                    }
                     .onDrop(
                         of: [.fileURL],
-                        delegate: FolderDropDelegate(
-                            destination: crumb.item,
-                            dragState: dragState,
-                            isTargeted: nil,
-                            onTransfer: { items, destination, operation in
-                                onTransfer?(items, destination, operation)
-                            }
-                        )
+                        delegate: crumbDropDelegate(crumb: crumb, index: index)
                     )
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.bar)
         .focusEffectDisabled()
+        .onChange(of: dragState.items) { _, items in
+            if items.isEmpty { targetedIndex = nil }
+        }
+    }
+
+    private func crumbDropDelegate(
+        crumb: (name: String, item: ItemRef),
+        index: Int
+    ) -> FolderDropDelegate {
+        FolderDropDelegate(
+            destination: crumb.item,
+            dragState: dragState,
+            isTargeted: Binding(
+                get: { targetedIndex == index },
+                set: { isTargeted in
+                    if isTargeted {
+                        targetedIndex = index
+                    } else if targetedIndex == index {
+                        targetedIndex = nil
+                    }
+                }
+            ),
+            onTransfer: { items, destination, operation in
+                onTransfer?(items, destination, operation)
+            }
+        )
     }
 }
