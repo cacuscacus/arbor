@@ -105,6 +105,7 @@ struct ContentView: View {
             SSHAskpassPromptSheet(prompt: prompt)
         }
         .onAppear {
+            DragAutoScrollController.shared.install()
             SSHAskpassService.shared.onPromptChange = {
                 Task { @MainActor in
                     presentNextSSHPrompt()
@@ -141,6 +142,14 @@ struct ContentView: View {
                     dragState: dragState,
                     onOpenInSplit: { url in
                         tab.openInSplit(folder: url)
+                    },
+                    onTransferFiles: { items, destination, operation in
+                        await transferIntoFavorite(
+                            items,
+                            destination: destination,
+                            operation: operation,
+                            tab: tab
+                        )
                     }
                 )
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
@@ -256,6 +265,38 @@ struct ContentView: View {
 
     private func closeSelectedTab() {
         closeTab(id: selectedTabID)
+    }
+
+    /// Sidebar drops: move/copy files into a favorite folder and record it in
+    /// the focused pane's undo stack so ⌘Z reverses it there.
+    private func transferIntoFavorite(
+        _ items: [ItemRef],
+        destination: ItemRef,
+        operation: FileTransferOperation,
+        tab: BrowserTab
+    ) async -> String? {
+        let pane = tab.panes.first { $0.id == tab.focusedPaneID } ?? tab.panes[0]
+        let outcome = await FileTransferService.transfer(
+            items,
+            into: destination,
+            operation: operation
+        )
+        if !outcome.transferred.isEmpty {
+            switch operation {
+            case .move:
+                pane.undoStack.register(.move(outcome.transferred))
+            case .copy:
+                pane.undoStack.register(.copy(outcome.transferred))
+            }
+        }
+        BrowserListingDidChange.post(
+            folders: FileTransferService.affectedFolders(
+                for: outcome,
+                destination: destination,
+                operation: operation
+            )
+        )
+        return FileTransferService.failureMessage(for: outcome, operation: operation)
     }
 
     private func closeTab(id: BrowserTab.ID) {

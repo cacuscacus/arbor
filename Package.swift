@@ -21,6 +21,8 @@ let package = Package(
                 "GoToFolderResolver.swift",
                 "FilenameSearchPattern.swift",
                 "FileDragPayload.swift",
+                "PasteDestinationResolver.swift",
+                "SidebarDropRouting.swift",
             ]
         ),
         .testTarget(

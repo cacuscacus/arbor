@@ -135,8 +135,22 @@ final class BrowserSessionStore {
         supportDirectoryURL.appendingPathComponent("session.json", isDirectory: false)
     }
 
+    /// Copy of the session as it was before the latest write. Used when the
+    /// live file is missing or unreadable (hand-edited, truncated, replaced by
+    /// another build), so a window's tabs can still be recovered.
+    static var sessionBackupFileURL: URL {
+        supportDirectoryURL.appendingPathComponent("session.previous.json", isDirectory: false)
+    }
+
     private func loadFromDisk() -> BrowserSessionSnapshot? {
-        let url = Self.sessionFileURL
+        if let snapshot = Self.readSnapshot(at: Self.sessionFileURL) {
+            return snapshot
+        }
+        // Fall back to the pre-write copy rather than starting from scratch.
+        return Self.readSnapshot(at: Self.sessionBackupFileURL)
+    }
+
+    private static func readSnapshot(at url: URL) -> BrowserSessionSnapshot? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
             let data = try Data(contentsOf: url)
@@ -162,6 +176,11 @@ final class BrowserSessionStore {
             }
             try data.write(to: temp, options: Data.WritingOptions())
             if fm.fileExists(atPath: dest.path) {
+                // Keep the last good session so an overwritten or corrupt file
+                // is recoverable on the next launch.
+                let backup = Self.sessionBackupFileURL
+                try? fm.removeItem(at: backup)
+                try? fm.copyItem(at: dest, to: backup)
                 _ = try fm.replaceItemAt(dest, withItemAt: temp)
             } else {
                 try fm.moveItem(at: temp, to: dest)

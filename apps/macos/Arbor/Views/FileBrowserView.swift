@@ -489,6 +489,17 @@ private struct LocalFileBrowserView: View {
                     .disabled(!canQuickDiff(selectedVisibleEntries()))
                     .opacity(0)
                     .allowsHitTesting(false)
+
+                Button("") { cutSelection() }
+                    .keyboardShortcut("x", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { pasteCutItems() }
+                    .keyboardShortcut("v", modifiers: .command)
+                    .disabled(FileClipboard.shared.cutItems.isEmpty)
+                    .opacity(0)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -706,6 +717,11 @@ private struct LocalFileBrowserView: View {
     @ViewBuilder
     private var emptySpaceContextMenu: some View {
         if !isSearchActive {
+            if capabilities.contains(.transfer), FileClipboard.shared.hasCutItems {
+                Button("Paste Item") { pasteCutItems() }
+                    .keyboardShortcut("v", modifiers: .command)
+                Divider()
+            }
             if capabilities.contains(.create) {
                 Button("New Folder…") {
                     beginCreateItem(.folder)
@@ -797,6 +813,14 @@ private struct LocalFileBrowserView: View {
                 presentQuickDiff(for: previewTargets(for: anchor))
             }
             .keyboardShortcut("d", modifiers: .command)
+        }
+
+        if capabilities.contains(.transfer), !targets.isEmpty {
+            Button("Cut") {
+                commitContextSelection(anchor: anchor)
+                cutSelection()
+            }
+            .keyboardShortcut("x", modifiers: .command)
         }
 
         if capabilities.contains(.rename),
@@ -1310,50 +1334,29 @@ private struct LocalFileBrowserView: View {
         }
         let sources = sourceItems
         let destination = destinationItem
-        let providerOperation = operation.providerOperation
 
         mutationTask = Task {
-            var transferred: [(from: ItemRef, to: ItemRef)] = []
-            var failed: [(ItemRef, Error)] = []
+            let outcome = await FileTransferService.transfer(
+                sources,
+                into: destination,
+                operation: operation
+            )
 
-            do {
-                let provider = try FileProviderRegistry.shared.provider(for: destination)
-                for source in sources {
-                    if source == destination { continue }
-                    if operation == .move, source.parent == destination { continue }
-                    do {
-                        let receipt = try await provider.transfer(
-                            source,
-                            into: destination,
-                            operation: providerOperation
-                        )
-                        transferred.append((receipt.from, receipt.to))
-                    } catch {
-                        failed.append((source, error))
-                    }
-                }
-            } catch {
+            if let message = FileTransferService.failureMessage(
+                for: outcome,
+                operation: operation
+            ) {
                 transferErrorTitle = operation.failureTitle
-                transferErrorMessage = error.localizedDescription
-                return
+                transferErrorMessage = message
             }
 
-            if !failed.isEmpty {
-                let names = failed.map { $0.0.name }.joined(separator: ", ")
-                let verbPast = operation == .copy ? "copied" : "moved"
-                transferErrorTitle = operation.failureTitle
-                transferErrorMessage = transferred.isEmpty
-                    ? "Could not \(operation == .copy ? "copy" : "move"): \(names)"
-                    : "Some items could not be \(verbPast): \(names)"
-            }
-
-            let newSelection = Set(transferred.map(\.to))
-            if !transferred.isEmpty {
+            let newSelection = Set(outcome.transferred.map(\.to))
+            if !outcome.transferred.isEmpty {
                 switch operation {
                 case .move:
-                    undoStack.register(.move(transferred))
+                    undoStack.register(.move(outcome.transferred))
                 case .copy:
-                    undoStack.register(.copy(transferred))
+                    undoStack.register(.copy(outcome.transferred))
                 }
             }
 
@@ -1364,12 +1367,33 @@ private struct LocalFileBrowserView: View {
             }
             selection = newSelection
 
-            var affected = [destination]
-            if operation == .move {
-                affected.append(contentsOf: transferred.compactMap(\.from.parent))
-            }
-            BrowserListingDidChange.post(folders: affected)
+            BrowserListingDidChange.post(
+                folders: FileTransferService.affectedFolders(
+                    for: outcome,
+                    destination: destination,
+                    operation: operation
+                )
+            )
         }
+    }
+
+    // MARK: - Cut / paste
+
+    private func cutSelection() {
+        let targets = selectedVisibleEntries().map(\.id)
+        guard !targets.isEmpty else { return }
+        FileClipboard.shared.cut(targets)
+    }
+
+    /// Moves the cut items into the selected folder (or the current folder).
+    private func pasteCutItems() {
+        let items = FileClipboard.shared.takeCutItems()
+        guard !items.isEmpty else { return }
+        let destination = PasteDestinationResolver.resolve(
+            selectedFolders: selectedVisibleEntries().filter(\.isBrowsable).map(\.id),
+            currentFolder: navigation.current
+        )
+        handleTransfer(items, into: destination, operation: .move)
     }
 
     private func beginCreateItem(_ kind: CreateItemKind) {

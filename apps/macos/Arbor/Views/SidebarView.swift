@@ -11,9 +11,15 @@ struct SidebarView: View {
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
     var onOpenInSplit: ((ItemRef) -> Void)? = nil
+    /// Moves/copies dropped files into a favorite folder. Returns an error
+    /// message when part of the transfer failed.
+    var onTransferFiles: (([ItemRef], ItemRef, FileTransferOperation) async -> String?)?
 
     @State private var draggingFavoriteID: UUID?
     @State private var dropTargetIndex: Int?
+    /// Favorite row highlighted as a *transfer* target (files dropped on it).
+    @State private var transferTargetID: UUID?
+    @State private var transferErrorMessage: String?
     @State private var sshLocations = SSHLocationStore.shared
     @State private var showingSSHLocationSheet = false
     @Namespace private var favoritesNamespace
@@ -59,6 +65,17 @@ struct SidebarView: View {
                 navigation.go(to: root)
             }
         }
+        .alert(
+            "Could not move items",
+            isPresented: Binding(
+                get: { transferErrorMessage != nil },
+                set: { if !$0 { transferErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { transferErrorMessage = nil }
+        } message: {
+            Text(transferErrorMessage ?? "")
+        }
         .background {
             DragSessionEndedCleaner {
                 // Delay past DropDelegate.performDrop so insert index / urls
@@ -67,6 +84,7 @@ struct SidebarView: View {
                     withAnimation(listSpring) {
                         draggingFavoriteID = nil
                         dropTargetIndex = nil
+                        transferTargetID = nil
                     }
                     dragState.clear()
                 }
@@ -141,6 +159,24 @@ struct SidebarView: View {
         )
     }
 
+    private func makeFavoriteDropDelegate(
+        item: FavoriteItem,
+        insertIndex: Int
+    ) -> SidebarFavoriteDropDelegate {
+        SidebarFavoriteDropDelegate(
+            destination: item,
+            index: insertIndex,
+            dragState: dragState,
+            draggingFavoriteID: $draggingFavoriteID,
+            dropTargetIndex: $dropTargetIndex,
+            transferTargetID: $transferTargetID,
+            transferErrorMessage: $transferErrorMessage,
+            favorites: favorites,
+            animation: interactiveSpring,
+            onTransferFiles: onTransferFiles
+        )
+    }
+
     /// Live layout shown while dragging: either a provisional reorder, or ghost
     /// slots for folders about to be pinned from the browser.
     private var previewRows: [FavoritePreviewRow] {
@@ -176,7 +212,7 @@ struct SidebarView: View {
     }
 
     private var pendingAddURLs: [URL] {
-        guard draggingFavoriteID == nil else { return [] }
+        guard draggingFavoriteID == nil, transferTargetID == nil else { return [] }
         let existing = Set(favorites.items.map(\.itemRef))
         return dragState.items
             .filter { !existing.contains($0) }
@@ -270,6 +306,7 @@ struct SidebarView: View {
 
     private func favoriteRow(_ item: FavoriteItem, dropIndex: Int, isLifted: Bool) -> some View {
         let isCurrent = item.itemRef == navigation.current
+        let isTransferTarget = transferTargetID == item.id
 
         return Button {
             navigation.go(to: item.itemRef)
@@ -284,7 +321,18 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .background {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isCurrent ? Color.primary.opacity(0.08) : Color.clear)
+                .fill(
+                    isTransferTarget
+                        ? Color.accentColor.opacity(0.18)
+                        : (isCurrent ? Color.primary.opacity(0.08) : Color.clear)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(
+                            isTransferTarget ? Color.accentColor.opacity(0.7) : Color.clear,
+                            lineWidth: 1
+                        )
+                }
         }
         .scaleEffect(isLifted ? 1.03 : 1.0)
         .opacity(isLifted ? 0.55 : 1)
@@ -297,7 +345,7 @@ struct SidebarView: View {
         }
         .onDrop(
             of: [.text, .fileURL],
-            delegate: makeDropDelegate(insertIndex: dropIndex)
+            delegate: makeFavoriteDropDelegate(item: item, insertIndex: dropIndex)
         )
         .contextMenu {
             Button("Open in New Window") {
@@ -490,6 +538,139 @@ private struct SidebarDropDelegate: DropDelegate {
 
         group.notify(queue: .main) {
             completion(urls)
+        }
+    }
+}
+
+/// Drop behavior for one favorite row.
+///
+/// Two different gestures land here:
+/// - dragging a favorite (the row's drag payload is a UUID string) reorders
+///   the list, exactly like dropping in the gaps;
+/// - dragging files (from the browser or another app) moves/copies them into
+///   that favorite's folder, like dropping onto a folder in Finder.
+private struct SidebarFavoriteDropDelegate: DropDelegate {
+    let destination: FavoriteItem
+    let index: Int
+    let dragState: FileDragState
+    @Binding var draggingFavoriteID: UUID?
+    @Binding var dropTargetIndex: Int?
+    @Binding var transferTargetID: UUID?
+    @Binding var transferErrorMessage: String?
+    let favorites: SidebarFavoritesStore
+    let animation: Animation
+    let onTransferFiles: (([ItemRef], ItemRef, FileTransferOperation) async -> String?)?
+
+    /// Favorites are dragged as text; anything else here is a file drag.
+    private var isFileDrag: Bool { draggingFavoriteID == nil }
+
+    private var reorderDelegate: SidebarDropDelegate {
+        SidebarDropDelegate(
+            index: index,
+            dragState: dragState,
+            draggingFavoriteID: $draggingFavoriteID,
+            dropTargetIndex: $dropTargetIndex,
+            favorites: favorites,
+            animation: animation
+        )
+    }
+
+    private func carriesFiles(_ info: DropInfo) -> Bool {
+        !dragState.items.isEmpty || info.hasItemsConforming(to: [.fileURL])
+    }
+
+    private func decision(_ info: DropInfo) -> SidebarDropDecision {
+        SidebarDropRouting.decision(
+            isDraggingFavorite: !isFileDrag,
+            carriesFiles: carriesFiles(info),
+            canTransfer: onTransferFiles != nil
+        )
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        if decision(info) == .transferFiles {
+            return true
+        }
+        return reorderDelegate.validateDrop(info: info)
+    }
+
+    func dropEntered(info: DropInfo) {
+        if decision(info) == .transferFiles {
+            withAnimation(animation) {
+                transferTargetID = destination.id
+                dropTargetIndex = nil
+            }
+            return
+        }
+        reorderDelegate.dropEntered(info: info)
+    }
+
+    func dropExited(info: DropInfo) {
+        if transferTargetID == destination.id {
+            withAnimation(animation) { transferTargetID = nil }
+            return
+        }
+        reorderDelegate.dropExited(info: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        if decision(info) == .transferFiles, transferTargetID == destination.id {
+            return DropProposal(operation: FileTransferOperation.fromModifierFlags.dropOperation)
+        }
+        return reorderDelegate.dropUpdated(info: info)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        if decision(info) == .transferFiles {
+            transferTargetID = nil
+            let operation = FileTransferOperation.fromModifierFlags
+            let items = dragState.items
+            dragState.clear()
+
+            if !items.isEmpty {
+                let filtered = items.filter { $0 != destination.itemRef }
+                guard !filtered.isEmpty else { return true }
+                Task { @MainActor in
+                    if let message = await onTransferFiles?(filtered, destination.itemRef, operation) {
+                        transferErrorMessage = message
+                    }
+                }
+                return true
+            }
+
+            let providers = info.itemProviders(for: [.fileURL])
+            guard !providers.isEmpty else { return false }
+            Task { @MainActor in
+                let refs = await Self.loadItemRefs(from: providers)
+                    .filter { $0 != destination.itemRef }
+                guard !refs.isEmpty else { return }
+                if let message = await onTransferFiles?(refs, destination.itemRef, operation) {
+                    transferErrorMessage = message
+                }
+            }
+            return true
+        }
+        return reorderDelegate.performDrop(info: info)
+    }
+
+    private static func loadItemRefs(from providers: [NSItemProvider]) async -> [ItemRef] {
+        await withCheckedContinuation { continuation in
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var refs: [ItemRef] = []
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    defer { group.leave() }
+                    guard let url else { return }
+                    lock.lock()
+                    refs.append(LocalFileLocation.item(for: url))
+                    lock.unlock()
+                }
+            }
+            group.notify(queue: .main) {
+                continuation.resume(returning: refs)
+            }
         }
     }
 }

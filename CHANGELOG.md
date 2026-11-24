@@ -11,6 +11,18 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Added
+
+- **Cut and paste for moving files**: ⌘X remembers the selection and ⌘V moves it into the selected folder (or the one being browsed), with context-menu entries and ⌘Z undo
+- **Session backup**: the previous `session.json` is kept as `session.previous.json` and used when the live file is missing or unreadable, so a window's tabs survive a corrupt or overwritten session
+- **Continuous drag autoscroll**: dragging to the edge of a list now keeps scrolling (and accelerates), so a file can be dragged across a long folder and dropped on a folder far away
+
+### Fixed
+
+- **Dropping files on a sidebar favorite did nothing**: favorites only handled reordering. Dropping files on a favorite folder now moves them into it (⌥ copies), highlights the row, and records the move in the pane's undo stack; pinning a folder still works from the gaps between rows
+- **Dropping on a folder row only worked over the Name column**: Kind/Size/Date drops fell through and were treated as a drop on the current folder (a no-op). The row under the pointer is now resolved at drop time
+- Drag autoscroll stalled after a small scroll and never reached the top of the list because the visible edge sits under the breadcrumb chrome
+
 ### Fixed
 
 - **Drag and drop delivered the wrong files**: dragging a multi-selection handed every dragged item the *same* file, and a single file lost its name (browsers invented one). Each row's `NSItemProvider` now describes only its own file, carries `suggestedName`, and no longer exposes the file's contents as a second representation (which is what made WebKit build a nameless `File`). Verified against a real drag pasteboard: one item per selected file, distinct URLs, names attached.

@@ -51,13 +51,12 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                 .opacity(entry.listingOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .dropFolderTarget(entry: entry, dragState: dragState, onTransfer: onTransfer)
             }
             .width(min: 180, ideal: 280)
 
             if settings.showKind {
                 TableColumn("Kind", value: \.kind) { entry in
-                    Text(entry.kind)
+                                        Text(entry.kind)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
@@ -67,7 +66,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if settings.showSize {
                 TableColumn("Size", value: \.sizeForSort) { entry in
-                    Text(entry.formattedSize)
+                                        Text(entry.formattedSize)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -78,7 +77,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if settings.showModified {
                 TableColumn("Date Modified", value: \.modifiedForSort) { entry in
-                    Text(entry.formatted(entry.modified))
+                                        Text(entry.formatted(entry.modified))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
@@ -88,7 +87,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if settings.showCreated {
                 TableColumn("Date Created", value: \.createdForSort) { entry in
-                    Text(entry.formatted(entry.created))
+                                        Text(entry.formatted(entry.created))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(entry.listingOpacity)
@@ -98,7 +97,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if settings.showRelativePath {
                 TableColumn("Relative Path") { entry in
-                    Text(entry.relativePath(to: relativeRoot))
+                                        Text(entry.relativePath(to: relativeRoot))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -110,7 +109,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if settings.showFullPath {
                 TableColumn("Full Path", value: \.fullPath) { entry in
-                    Text(entry.fullPath)
+                                        Text(entry.fullPath)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -122,7 +121,7 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
 
             if showsLocation {
                 TableColumn("Location", value: \.location) { entry in
-                    Text(entry.location)
+                                        Text(entry.location)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -149,7 +148,14 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
         .contextMenu {
             emptySpaceMenu()
         }
-        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
+        .dropIntoCurrentFolder(
+            currentFolder,
+            dragState: dragState,
+            resolveDestination: {
+                FileTableRowResolver.folder(under: NSEvent.mouseLocation, entries: entries)
+            },
+            onTransfer: onTransfer
+        )
         .scrollEdgeEffectStyle(.soft, for: .top)
         .background {
             TableInteractionInstaller(
@@ -214,7 +220,14 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
         // Reach under the toolbar glass like SwiftUI Table/list. Safe-area inset is
         // applied by NSScrollView.automaticallyAdjustsContentInsets instead.
         .ignoresSafeArea(.container, edges: .top)
-        .dropIntoCurrentFolder(currentFolder, dragState: dragState, onTransfer: onTransfer)
+        .dropIntoCurrentFolder(
+            currentFolder,
+            dragState: dragState,
+            resolveDestination: {
+                FileTableRowResolver.folder(under: NSEvent.mouseLocation, entries: entries)
+            },
+            onTransfer: onTransfer
+        )
         .scrollEdgeEffectStyle(.soft, for: .top)
         // Do not paint an opaque `.background` here — it kills Liquid Glass underlap.
         .focusEffectDisabled()
@@ -255,6 +268,37 @@ struct FileIconImage: View {
 }
 
 // MARK: - Drag / drop helpers
+
+/// Maps the pointer to a folder row so a drop anywhere on a folder's row moves
+/// into it (the cells themselves can't own drop targets: that breaks row drag).
+nonisolated enum FileTableRowResolver {
+    static func folder(under screenPoint: NSPoint, entries: [FileEntry]) -> ItemRef? {
+        guard let window = NSApp.windows.first(where: {
+            $0.isVisible && $0.frame.contains(screenPoint)
+        }),
+            let hit = window.contentView?.hitTest(
+                window.convertPoint(fromScreen: screenPoint)
+            )
+        else { return nil }
+
+        var view: NSView? = hit
+        while let current = view {
+            if let table = current as? NSTableView {
+                let pointInTable = table.convert(
+                    window.convertPoint(fromScreen: screenPoint),
+                    from: nil
+                )
+                let row = table.row(at: pointInTable)
+                guard row >= 0, entries.indices.contains(row) else { return nil }
+                let entry = entries[row]
+                return entry.isBrowsable ? entry.id : nil
+            }
+            view = current.superview
+        }
+        return nil
+    }
+}
+
 
 private func fileDragItemProvider(
     for entry: FileEntry,
@@ -317,6 +361,7 @@ extension View {
     fileprivate func dropIntoCurrentFolder(
         _ folder: ItemRef?,
         dragState: FileDragState,
+        resolveDestination: (() -> ItemRef?)? = nil,
         onTransfer: @escaping ([ItemRef], ItemRef, FileTransferOperation) -> Void
     ) -> some View {
         if let folder {
@@ -326,6 +371,7 @@ extension View {
                     destination: folder,
                     dragState: dragState,
                     isTargeted: nil,
+                    resolveDestination: resolveDestination,
                     onTransfer: onTransfer
                 )
             )

@@ -437,7 +437,14 @@ struct FolderDropDelegate: DropDelegate {
     let destination: ItemRef
     let dragState: FileDragState
     var isTargeted: Binding<Bool>?
+    /// When set, a folder row under the pointer wins over the pane's folder
+    /// (so dropping anywhere on a folder row moves into it).
+    var resolveDestination: (() -> ItemRef?)?
     let onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
+
+    private var effectiveDestination: ItemRef {
+        resolveDestination?() ?? destination
+    }
 
     func validateDrop(info: DropInfo) -> Bool {
         true
@@ -458,6 +465,7 @@ struct FolderDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         isTargeted?.wrappedValue = false
         let operation = FileTransferOperation.fromModifierFlags
+        let destination = effectiveDestination
         let items = dragState.items
         dragState.clear()
         let filtered = items.filter {
@@ -491,3 +499,4 @@ struct FolderDropDelegate: DropDelegate {
         return true
     }
 }
+
