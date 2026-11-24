@@ -4,11 +4,22 @@ import SwiftUI
 /// Hooks the detail file table for:
 /// - double-click → open
 /// - delayed second click on an already-selected name → rename
+/// - keeping the clip-view origin stable across selection (see below)
 ///
 /// On macOS 26 SwiftUI's `Table` is backed by `SwiftUIOutlineTableView` (an
 /// `NSOutlineView` subclass), so outline views are valid detail tables. The
 /// sidebar is an outline view too; the installer lives in the detail pane and
 /// picks the table whose frame matches it, so the sidebar is never hooked.
+///
+/// Scroll / selection jump: the table's clip view uses `contentInsets.top=28`
+/// for the column header, so the resting origin at scroll-top is `-28`. AppKit
+/// clamps that origin to `0` when it reveals a selected row, which scrolls the
+/// list by a header height, slides the first rows under the titles, and moves
+/// the row under the cursor. We capture the origin on mouse-down and restore it
+/// after selection (sync + async), matching the icon-view fix from 1.7.3.
+/// Chrome under the toolbar is layout padding on the SwiftUI `Table`, not a
+/// scroll-view content inset — those insets put the resting origin at `-80`
+/// and the clamp scrolled ~3 rows.
 struct TableInteractionInstaller: NSViewRepresentable {
     var rowCount: Int
     var nameColumnIndex: Int = 0
@@ -49,9 +60,15 @@ struct TableInteractionInstaller: NSViewRepresentable {
         var rowCount: Int = 0
         var nameColumnIndex: Int = 0
 
+        /// Clip-view origin at mouse-down; restored after AppKit's selection reveal.
+        var originBeforeClick: NSPoint?
+        /// Row under the pointer at mouse-down — used when `clickedRow` is -1.
+        var rowBeforeClick: Int = -1
+
         private var renameWorkItem: DispatchWorkItem?
         private var lastClickedRow: Int = -1
         private var lastClickAt: Date = .distantPast
+        private weak var hookedTable: NSTableView?
 
         init(
             isRowSelected: @escaping (Int) -> Bool,
@@ -63,10 +80,103 @@ struct TableInteractionInstaller: NSViewRepresentable {
             self.onRenameRow = onRenameRow
         }
 
+        func attach(table: NSTableView) {
+            hookedTable = table
+        }
+
+        func captureClickGeometry(in table: NSTableView, event: NSEvent) {
+            guard let scroll = table.enclosingScrollView else { return }
+            let clip = scroll.contentView
+            originBeforeClick = clip.bounds.origin
+            let point = table.convert(event.locationInWindow, from: nil)
+            rowBeforeClick = table.row(at: point)
+            DragDebugLog.log(
+                "table.mouseDown row=\(rowBeforeClick)"
+                    + " origin.y=\(clip.bounds.origin.y)"
+                    + " scrollInsets.top=\(scroll.contentInsets.top)"
+                    + " clipInsets.top=\(clip.contentInsets.top)"
+            )
+        }
+
+        /// Undo AppKit clamping the clip origin to 0 when revealing selection.
+        ///
+        /// Restoring the origin stops the visual jump, but AppKit has already
+        /// moved the selection to the row that sat under the pointer *after* the
+        /// clamp. Put the selection back on the row the user actually pressed.
+        func restoreOriginAfterSelectionIfNeeded() {
+            guard let before = originBeforeClick,
+                  let table = hookedTable,
+                  let scroll = table.enclosingScrollView
+            else { return }
+            let clip = scroll.contentView
+            let current = clip.bounds.origin
+            guard abs(current.y - before.y) > 0.5 || abs(current.x - before.x) > 0.5 else {
+                return
+            }
+            DragDebugLog.log("table.restore.origin from=\(current.y) to=\(before.y)")
+            clip.setBoundsOrigin(before)
+            scroll.reflectScrolledClipView(clip)
+            fixSelectionAfterClamp(in: table)
+        }
+
+        /// The clamp changed which row is under the pointer, so AppKit selected
+        /// a different row than the one pressed. Re-select the pressed row.
+        /// Only for a plain click: keep modifier-driven multi-selection intact.
+        private func fixSelectionAfterClamp(in table: NSTableView) {
+            guard rowBeforeClick >= 0,
+                  rowBeforeClick < rowCount,
+                  NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty,
+                  table.selectedRow != rowBeforeClick
+            else { return }
+            DragDebugLog.log(
+                "table.selection.fix from=\(table.selectedRow) to=\(rowBeforeClick)"
+            )
+            table.selectRowIndexes(
+                IndexSet(integer: rowBeforeClick),
+                byExtendingSelection: false
+            )
+        }
+
+        /// AppKit often clamps *after* our action runs — restore now and on the
+        /// next turns. Keep `originBeforeClick` until the next mouse-down so a
+        /// double-click's second press can reuse / refresh the capture.
+        func restoreOriginGuarded() {
+            restoreOriginAfterSelectionIfNeeded()
+            DispatchQueue.main.async { [weak self] in
+                self?.restoreOriginAfterSelectionIfNeeded()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.restoreOriginAfterSelectionIfNeeded()
+            }
+        }
+
         @objc func tableClicked(_ sender: Any?) {
             guard let table = sender as? NSTableView else { return }
-            let row = table.clickedRow
+            restoreOriginAfterSelectionIfNeeded()
+
+            var row = table.clickedRow
             let column = table.clickedColumn
+            if rowBeforeClick >= 0,
+               NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty,
+               rowBeforeClick != row
+            {
+                // clickedRow reflects the post-clamp layout; the pressed row is
+                // what the user aimed at.
+                row = rowBeforeClick
+            } else if row < 0, rowBeforeClick >= 0 {
+                row = rowBeforeClick
+            }
+            if let scroll = table.enclosingScrollView {
+                let clip = scroll.contentView
+                DragDebugLog.log(
+                    "table.clicked row=\(row) col=\(column)"
+                        + " origin.y=\(clip.bounds.origin.y)"
+                        + " scrollInsets.top=\(scroll.contentInsets.top)"
+                        + " clipInsets.top=\(clip.contentInsets.top)"
+                )
+            }
+            restoreOriginGuarded()
+
             guard row >= 0, row < rowCount else {
                 cancelPendingRename()
                 return
@@ -101,14 +211,24 @@ struct TableInteractionInstaller: NSViewRepresentable {
         @objc func tableDoubleClicked(_ sender: Any?) {
             cancelPendingRename()
             guard let table = sender as? NSTableView else { return }
+            // Undo any clamp before resolving the row from the event location.
+            restoreOriginAfterSelectionIfNeeded()
+
             // `clickedRow` is -1 here for SwiftUI's table (the double-click is
-            // dispatched after SwiftUI resets it); resolve from the event.
+            // dispatched after SwiftUI resets it); resolve from the event, then
+            // fall back to the row captured on mouse-down.
+            let rawClicked = table.clickedRow
             let row: Int
-            if let event = NSApp.currentEvent {
-                row = table.row(at: table.convert(event.locationInWindow, from: nil))
+            if rawClicked >= 0 {
+                row = rawClicked
+            } else if let event = NSApp.currentEvent {
+                let fromEvent = table.row(at: table.convert(event.locationInWindow, from: nil))
+                row = fromEvent >= 0 ? fromEvent : rowBeforeClick
             } else {
-                row = table.clickedRow
+                row = rowBeforeClick
             }
+            DragDebugLog.log("table.doubleClick rawClicked=\(rawClicked) resolved=\(row)")
+            restoreOriginGuarded()
             guard row >= 0, row < rowCount else { return }
             onDoubleClickRow(row)
         }
@@ -124,11 +244,14 @@ struct TableInteractionInstaller: NSViewRepresentable {
         private weak var hookedTable: NSTableView?
         private var attempts = 0
         private var dragMonitor: Any?
+        private var mouseDownMonitor: Any?
+        /// Last logged geometry — avoid flooding `/tmp/arbor-dnd.log` on every SwiftUI update.
+        private var lastGeomKey: String = ""
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             scheduleInstall()
-            installDragMonitor()
+            installEventMonitors()
         }
 
         override func layout() {
@@ -139,6 +262,9 @@ struct TableInteractionInstaller: NSViewRepresentable {
         deinit {
             if let dragMonitor {
                 NSEvent.removeMonitor(dragMonitor)
+            }
+            if let mouseDownMonitor {
+                NSEvent.removeMonitor(mouseDownMonitor)
             }
         }
 
@@ -163,13 +289,27 @@ struct TableInteractionInstaller: NSViewRepresentable {
             }
         }
 
-        private func installDragMonitor() {
-            guard dragMonitor == nil else { return }
-            // If the user starts dragging, don't fire the delayed rename.
-            dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] event in
-                self?.coordinator?.cancelPendingRename()
-                return event
+        private func installEventMonitors() {
+            if dragMonitor == nil {
+                // If the user starts dragging, don't fire the delayed rename.
+                dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] event in
+                    self?.coordinator?.cancelPendingRename()
+                    return event
+                }
             }
+            if mouseDownMonitor == nil {
+                mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+                    self?.handleMouseDown(event)
+                    return event
+                }
+            }
+        }
+
+        private func handleMouseDown(_ event: NSEvent) {
+            guard let table = hookedTable, table.window === event.window else { return }
+            let pointInTable = table.convert(event.locationInWindow, from: nil)
+            guard table.bounds.contains(pointInTable) else { return }
+            coordinator?.captureClickGeometry(in: table, event: event)
         }
 
         private func tryInstall() {
@@ -193,6 +333,7 @@ struct TableInteractionInstaller: NSViewRepresentable {
             }
 
             hookedTable = table
+            coordinator.attach(table: table)
             applyHooks(to: table)
         }
 
@@ -211,7 +352,22 @@ struct TableInteractionInstaller: NSViewRepresentable {
                 if scroll.contentInsets.top != 0 || scroll.contentInsets.bottom != 0 {
                     scroll.contentInsets = NSEdgeInsets()
                 }
-                scroll.contentView.contentInsets = NSEdgeInsets()
+                // Do NOT touch scroll.contentView.contentInsets: NSTableView uses
+                // it to reserve the header height (28pt); zeroing it drew the
+                // first row underneath the column titles.
+                let clip = scroll.contentView
+                let key =
+                    "\(scroll.automaticallyAdjustsContentInsets)|\(scroll.contentInsets.top)"
+                    + "|\(clip.contentInsets.top)|\(Int(clip.bounds.origin.y.rounded()))"
+                if key != lastGeomKey {
+                    lastGeomKey = key
+                    DragDebugLog.log(
+                        "table.geom autoAdj=\(scroll.automaticallyAdjustsContentInsets)"
+                            + " scrollInsets.top=\(scroll.contentInsets.top)"
+                            + " clipInsets.top=\(clip.contentInsets.top)"
+                            + " origin.y=\(clip.bounds.origin.y)"
+                    )
+                }
             }
         }
 

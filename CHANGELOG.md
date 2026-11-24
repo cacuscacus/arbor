@@ -11,6 +11,15 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.7] — 2026-11-24
+
+### Fixed
+
+- **List view jumped on click and selected the wrong row** (and double-click could not open folders). The table's clip view reserves 28pt for the column header, so the resting scroll origin is `-28`; AppKit clamped it to `0` when revealing the selection, moving the content under the pointer. The origin is now captured on mouse-down and restored, and the selection is put back on the row that was actually pressed
+- **First row drawn under the column titles**: the previous attempt zeroed the clip view's content inset, which NSTableView uses for the header. It is preserved now, so the header always sits above row 0
+- Double-click resolves the pressed row from the mouse-down capture (`clickedRow` is `-1` for SwiftUI's table)
+
+
 ## [1.7.6] — 2026-11-24
 
 ### Fixed
@@ -285,7 +294,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.6...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.7...HEAD
+[1.7.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.7
 [1.7.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.6
 [1.7.4]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.4
 [1.7.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.3
