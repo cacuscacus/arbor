@@ -315,7 +315,10 @@ nonisolated enum FileTableRowResolver {
                     from: nil
                 )
                 let row = table.row(at: pointInTable)
-                guard row >= 0, entries.indices.contains(row) else { return nil }
+                guard row >= 0, entries.indices.contains(row) else {
+                    DragDebugLog.log("table.resolve no row (row=\(row))")
+                    return nil
+                }
                 let entry = entries[row]
                 return entry.isBrowsable ? entry.id : nil
             }

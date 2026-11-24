@@ -472,6 +472,7 @@ struct FolderDropDelegate: DropDelegate {
         onDropTargetChange?(nil)
         let operation = FileTransferOperation.fromModifierFlags
         let destination = effectiveDestination
+        DragDebugLog.log("drop.perform destination=\(destination.path) pane=\(self.destination.path) items=\(dragState.items.count)")
         let items = dragState.items
         dragState.clear()
         let filtered = items.filter {

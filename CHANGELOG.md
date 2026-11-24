@@ -11,6 +11,15 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.2] — 2026-11-24
+
+### Fixed
+
+- **First drag onto a folder in icon view failed, and the grid jumped on first click.** AppKit applied the window's 52 pt top content inset several seconds after the icon view mounted, which shifted the content under the pointer — the drop resolved to no folder (the icon snapped back) and the grid visibly moved. The scroll position is now compensated when that inset arrives, so nothing shifts afterwards
+- Icon-view drops no longer require landing exactly on the folder's frame: the whole icon+label cell resolves to the folder, and the hovered folder shows an accent plate
+- Added opt-in drag & drop diagnostics: launch with `ARBOR_DND_DEBUG=1` to append source/target resolution to `/tmp/arbor-dnd.log`
+
+
 ## [1.7.1] — 2026-11-24
 
 ### Fixed
@@ -249,7 +258,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.2
 [1.7.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.1
 [1.7.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.0
 [1.6.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.6.1

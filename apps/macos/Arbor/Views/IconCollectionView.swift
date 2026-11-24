@@ -404,6 +404,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
             return []
         }
         setDropTargetIndex(index, in: collectionView)
+        DragDebugLog.log("icon.validate proposed=\(proposedDropIndexPath.pointee.item) resolved=\(index) name=\(entries[index].name)")
         proposedDropIndexPath.pointee = IndexPath(item: index, section: 0) as NSIndexPath
         proposedDropOperation.pointee = .on
         return draggingInfo.draggingSourceOperationMask.intersection(
@@ -438,6 +439,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         else { return false }
 
         let urls = Self.readFileURLs(from: draggingInfo.draggingPasteboard)
+        DragDebugLog.log("icon.accept index=\(indexPath.item) urls=\(urls.map(\.lastPathComponent))")
         guard !urls.isEmpty else { return false }
         let copy = NSEvent.modifierFlags.contains(.option)
             || draggingInfo.draggingSourceOperationMask.contains(.copy)
@@ -470,6 +472,9 @@ protocol IconCollectionEventHandling: AnyObject {
 final class IconCollectionNSView: NSCollectionView {
     weak var eventHandler: IconCollectionEventHandling?
 
+    /// Last top inset AppKit applied (safe area under the floating chrome).
+    private var lastTopInset: CGFloat = 0
+
     private var marqueeStart: CGPoint?
     private var marqueeLayer: CAShapeLayer?
 
@@ -477,6 +482,27 @@ final class IconCollectionNSView: NSCollectionView {
         super.viewDidMoveToWindow()
         wantsLayer = true
         registerForDraggedTypes([.fileURL])
+        lastTopInset = enclosingScrollView?.contentInsets.top ?? 0
+    }
+
+    /// AppKit applies the window's safe-area inset to the scroll view a few
+    /// seconds after mount (once the floating chrome lays out). That shifts the
+    /// content under the pointer: the first drag after opening a folder missed
+    /// its target and the grid visibly jumped on first click. Compensate so the
+    /// same item stays where it was on screen.
+    override func layout() {
+        if let scroll = enclosingScrollView {
+            let top = scroll.contentInsets.top
+            if abs(top - lastTopInset) > 0.5 {
+                let delta = top - lastTopInset
+                lastTopInset = top
+                let clip = scroll.contentView
+                var origin = clip.bounds.origin
+                origin.y += delta
+                clip.setBoundsOrigin(origin)
+            }
+        }
+        super.layout()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -876,10 +902,14 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
     }
 
     func beginFileDrag() {
-        guard let entry, let actions, let event = NSApp.currentEvent else { return }
+        guard let entry, let actions, let event = NSApp.currentEvent else {
+            DragDebugLog.log("icon.dragStart aborted (no entry/actions/event)")
+            return
+        }
         let urls = actions.beginDrag(anchor: entry).compactMap {
             FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
         }
+        DragDebugLog.log("icon.dragStart entry=\(entry.name) urls=\(urls.map(\.lastPathComponent))")
         guard !urls.isEmpty else { return }
         let draggingItems = FileDragPayload.draggingItems(
             for: urls,
