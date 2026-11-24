@@ -264,18 +264,14 @@ private func fileDragItemProvider(
     if !selection.wrappedValue.contains(entry.id) {
         selection.wrappedValue = [entry.id]
     }
-    let items = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
-    let urls = items.compactMap {
-        FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
+    // Record the whole selection once so in-app drops can move it, but the
+    // provider itself must describe this row only: SwiftUI creates one
+    // dragging item per row and drops its provider's multiple URLs otherwise.
+    _ = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
+    guard let url = FileProviderRegistry.shared.intrinsicLocalURL(for: entry.id) else {
+        return NSItemProvider()
     }
-    if urls.count == 1, let url = urls.first {
-        return NSItemProvider(contentsOf: url) ?? NSItemProvider()
-    }
-    let provider = NSItemProvider()
-    for url in urls {
-        provider.registerObject(url as NSURL, visibility: .all)
-    }
-    return provider
+    return FileDragPayload.provider(for: url)
 }
 
 extension View {
@@ -333,3 +329,4 @@ extension View {
         }
     }
 }
+

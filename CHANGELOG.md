@@ -11,6 +11,11 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+### Fixed
+
+- **Drag and drop delivered the wrong files**: dragging a multi-selection handed every dragged item the *same* file, and a single file lost its name (browsers invented one). Each row's `NSItemProvider` now describes only its own file, carries `suggestedName`, and no longer exposes the file's contents as a second representation (which is what made WebKit build a nameless `File`). Verified against a real drag pasteboard: one item per selected file, distinct URLs, names attached.
+- Icon-view drags now share the same payload builder (one pasteboard item per file, plus the legacy `NSFilenamesPboardType` list).
+
 ### Added
 
 - **Interactive SSH auth**: passwords and key passphrases prompt a secure in-app sheet via an OpenSSH askpass bridge; secrets can be **remembered in the Keychain** and are then answered automatically (entries are only readable by Arbor)

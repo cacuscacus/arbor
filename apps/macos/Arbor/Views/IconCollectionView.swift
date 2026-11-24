@@ -820,11 +820,11 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
             FileProviderRegistry.shared.intrinsicLocalURL(for: $0)
         }
         guard !urls.isEmpty else { return }
-        let draggingItems = urls.map { url -> NSDraggingItem in
-            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-            item.setDraggingFrame(iconView.frame, contents: iconView.image)
-            return item
-        }
+        let draggingItems = FileDragPayload.draggingItems(
+            for: urls,
+            frame: iconView.frame,
+            contents: iconView.image
+        )
         view.beginDraggingSession(with: draggingItems, event: event, source: self)
     }
 

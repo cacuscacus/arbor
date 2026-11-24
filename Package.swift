@@ -4,12 +4,13 @@ import PackageDescription
 // Pure-logic test package for Arbor's macOS app.
 //
 // The app itself is built by the Xcode project in apps/macos; this package
-// exists so the Foundation-only logic (Markdown renderer, source-language
-// detection, Go to Folder resolution, search-pattern interpretation) has
-// CI-enforceable unit tests without an Xcode test target. `swift test` runs
-// anywhere Swift runs.
+// exists so the logic that does not need a running app (Markdown renderer,
+// source-language detection, Go to Folder resolution, search-pattern
+// interpretation, drag payloads) has CI-enforceable unit tests without an
+// Xcode test target. `swift test` runs on macOS, where AppKit is available.
 let package = Package(
     name: "arbor-pure",
+    platforms: [.macOS(.v14)],
     targets: [
         .target(
             name: "ArborPure",
@@ -19,6 +20,7 @@ let package = Package(
                 "SourceLanguage.swift",
                 "GoToFolderResolver.swift",
                 "FilenameSearchPattern.swift",
+                "FileDragPayload.swift",
             ]
         ),
         .testTarget(
