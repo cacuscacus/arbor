@@ -11,6 +11,15 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-11-24
+
+### Fixed
+
+- **Clicking a folder in icon view scrolled the grid up by the height of the chrome.** AppKit scrolls the clip to reveal the selected item and clamps the safe-area offset back to 0. The origin captured on mouse-down is now restored after selection, so a click never moves the content
+- **A ghost "pin to Favorites" row appeared when clicking a folder in list view.** SwiftUI calls the row's drag provider while preparing a drag (on press, before the drag threshold), and that call recorded a drag payload as a side effect — the sidebar then showed the folder as if it were being dragged to Favorites. Providers no longer mutate drag state; in-app drops read the URLs from the pasteboard
+- If the safe-area inset arrives while a drag is in progress, the content is kept under the pointer so the drop target does not move
+
+
 ## [1.7.2] — 2026-11-24
 
 ### Fixed
@@ -258,7 +267,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.3
 [1.7.2]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.2
 [1.7.1]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.1
 [1.7.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.0

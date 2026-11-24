@@ -337,15 +337,16 @@ private func fileDragItemProvider(
     if !selection.wrappedValue.contains(entry.id) {
         selection.wrappedValue = [entry.id]
     }
-    // Record the whole selection once so in-app drops can move it, but the
-    // provider itself must describe this row only: SwiftUI creates one
-    // dragging item per row and drops its provider's multiple URLs otherwise.
+    // Deliberately no `dragState` side effect here: SwiftUI calls this closure
+    // while *preparing* a drag (on press, before the drag threshold), so
+    // recording the payload here made the sidebar believe a folder was being
+    // dragged to Favorites on a mere click. In-app drops read the URLs from the
+    // pasteboard instead.
     //
     // Caveat: SwiftUI only asks for providers of rows it has realized, so a
     // selection extending past the viewport can lose its off-screen rows on
     // an external drop. The icon view builds its dragging items from the
     // selection itself, so it always carries every selected file.
-    _ = dragState.beginDragging(anchor: entry.id, selection: selection.wrappedValue)
     guard let url = FileProviderRegistry.shared.intrinsicLocalURL(for: entry.id) else {
         return NSItemProvider()
     }

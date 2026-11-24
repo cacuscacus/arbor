@@ -270,6 +270,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     }
 
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+        (collectionView as? IconCollectionNSView)?.restoreOriginAfterSelectionIfNeeded()
         publishSelection(from: collectionView)
     }
 
@@ -391,6 +392,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         // resolve the cell ourselves so the whole icon+label area accepts drops.
         let point = collectionView.convert(draggingInfo.draggingLocation, from: nil)
         var index = proposedDropIndexPath.pointee.item
+        DragDebugLog.log("icon.validate point=\(point) proposed=\(index) itemAt=\(String(describing: collectionView.indexPathForItem(at: point)?.item)) frame=\(String(describing: collectionView.layoutAttributesForItem(at: IndexPath(item: max(0, index), section: 0))?.frame))")
         if !entries.indices.contains(index) || !entries[index].isBrowsable,
            let hit = collectionView.indexPathForItem(at: point)?.item,
            entries.indices.contains(hit),
@@ -482,27 +484,53 @@ final class IconCollectionNSView: NSCollectionView {
         super.viewDidMoveToWindow()
         wantsLayer = true
         registerForDraggedTypes([.fileURL])
-        lastTopInset = enclosingScrollView?.contentInsets.top ?? 0
+        lastInsets = enclosingScrollView?.contentInsets ?? NSEdgeInsets()
+        lastOrigin = enclosingScrollView?.contentView.bounds.origin ?? .zero
     }
 
-    /// AppKit applies the window's safe-area inset to the scroll view a few
-    /// seconds after mount (once the floating chrome lays out). That shifts the
-    /// content under the pointer: the first drag after opening a folder missed
-    /// its target and the grid visibly jumped on first click. Compensate so the
-    /// same item stays where it was on screen.
+    private var lastInsets = NSEdgeInsets()
+    private var lastOrigin = NSPoint.zero
+
+    /// AppKit applies the window's safe-area inset after the view is on screen,
+    /// which scrolls the content by that amount. If it lands while the pointer
+    /// is down (a drag in progress), the item under the cursor moves and the
+    /// drop resolves to nothing. Undo exactly the paired origin change so the
+    /// content stays under the pointer.
     override func layout() {
         if let scroll = enclosingScrollView {
-            let top = scroll.contentInsets.top
-            if abs(top - lastTopInset) > 0.5 {
-                let delta = top - lastTopInset
-                lastTopInset = top
-                let clip = scroll.contentView
-                var origin = clip.bounds.origin
-                origin.y += delta
-                clip.setBoundsOrigin(origin)
+            let insets = scroll.contentInsets
+            let origin = scroll.contentView.bounds.origin
+            let delta = insets.top - lastInsets.top
+            if abs(delta) > 0.5 {
+                let paired = abs((origin.y - lastOrigin.y) + delta) < 2
+                if paired, NSEvent.pressedMouseButtons != 0 {
+                    var restored = origin
+                    restored.y = lastOrigin.y
+                    scroll.contentView.setBoundsOrigin(restored)
+                    DragDebugLog.log("inset.preserve delta=\(delta) from=\(origin.y) to=\(restored.y)")
+                }
+                lastInsets = insets
             }
+            lastOrigin = scroll.contentView.bounds.origin
         }
         super.layout()
+    }
+
+    /// Origin captured on mouse-down. AppKit scrolls the clip when a click
+    /// selects an item (it clamps the safe-area offset back to 0), which moved
+    /// the whole grid up by the chrome height on the first click. Restoring the
+    /// origin keeps the content where the user clicked.
+    private var originBeforeClick: NSPoint?
+
+    func restoreOriginAfterSelectionIfNeeded() {
+        guard let before = originBeforeClick, let scroll = enclosingScrollView else { return }
+        originBeforeClick = nil
+        let clip = scroll.contentView
+        if clip.bounds.origin != before {
+            DragDebugLog.log("restore.origin from=\(clip.bounds.origin) to=\(before)")
+            clip.setBoundsOrigin(before)
+            scroll.reflectScrolledClipView(clip)
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -527,6 +555,8 @@ final class IconCollectionNSView: NSCollectionView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        originBeforeClick = enclosingScrollView?.contentView.bounds.origin
+        DragDebugLog.log("collection.mouseDown point=\(point) origin=\(enclosingScrollView?.contentView.bounds.origin ?? .zero) indexPath=\(indexPathForItem(at: point)?.item ?? -1)")
         // Layout cell frames are larger than Finder hit targets. Only treat icon/label
         // as “on item”; padding starts marquee (precise collision like before).
         if let indexPath = indexPathForItem(at: point),
