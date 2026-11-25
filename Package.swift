@@ -24,6 +24,8 @@ let package = Package(
                 "PasteDestinationResolver.swift",
                 "SidebarDropRouting.swift",
                 "DragAutoScrollController.swift",
+                "SearchEngine.swift",
+                "SearchPreferencesStore.swift",
             ]
         ),
         .testTarget(

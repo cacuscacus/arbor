@@ -11,6 +11,23 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-25
+
+### Added
+
+- **Streaming search with guardrails & progressive concentric rings**: `SearchService` now streams `mdfind` and `fd` incrementally with immediate early cutoff (`StreamingProcessRunner`), hard per-search timeouts with `SIGTERM` → `SIGKILL` escalation, and a breadth-first cycle-safe fallback walker (`CycleSafeDirectoryWalker`) using `(dev, ino)` tracking plus configurable node/depth caps
+- **Progressive "staircase" Global search**: when searching Globally, matches from your current folder (Ring 0 in-memory + Ring 1 subtree) appear immediately on top while Home/Global results stream underneath without shifting early hits
+- **Background Search Tabs (`⌘⇧F` & Open in Tab)**: search state moved to a pane-owned `SearchSession`; press `⌘⇧F` to open a dedicated Global Search Tab (or click **Open in Tab** in the search bar) so long searches run in the background with a live spinner and match badge on the tab pill while you keep browsing other tabs. Closing a tab cancels its active search immediately
+- **Live search status bar (`SearchStatusBanner`)**: shows active search engine, elapsed time, ring breakdown, an explicit **Stop** button (preserving partial results), inline **Load up to 2,000 / 5,000** expansion on limit reached, and **Continue (+10s)** on timeout
+- **Settings → Search (`⌘,`)**: configure default result limit, search timeout, max scanned entries, max depth, progressive scoping, auto-opening Global searches in a new tab, and editable folder/Global exclusion lists (including safe defaults skipping `Library/Caches` and `Library/CloudStorage`)
+- **Pure unit test suite (`SearchEngineTests`)**: 13 new tests covering NUL/chunk stream splitting, exclusion scoping, concentric-ring deduplication/ordering, infinite-producer early cutoff, hard timeouts, task cancellation, symlink cycles, depth/node caps, and preference persistence
+
+### Fixed
+
+- **Global search no longer hangs the app on short/broad queries**: eliminated unbounded `readDataToEndOfFile()` buffering of `mdfind` stdout and moved all `FileEntry` disk metadata lookups off `@MainActor`
+- **Floating search bar no longer overlaps the single-tab `+` button**
+- **Show Enclosing Folder** now works for both files and folders in search results and highlights the revealed item
+
 ## [1.7.8] — 2026-11-24
 
 ### Fixed
@@ -304,7 +321,8 @@ Tahoe.
 - Homebrew cask install (`cacuscacus/arbor`)
 - GitHub Releases packaging (`Arbor-*-macos-arm64.zip`)
 
-[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.7.8...HEAD
+[Unreleased]: https://github.com/cacuscacus/arbor/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/cacuscacus/arbor/releases/tag/v1.8.0
 [1.7.8]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.8
 [1.7.7]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.7
 [1.7.6]: https://github.com/cacuscacus/arbor/releases/tag/v1.7.6

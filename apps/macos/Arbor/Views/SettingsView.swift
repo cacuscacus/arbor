@@ -2,6 +2,124 @@ import AppKit
 import SwiftUI
 
 struct SettingsView: View {
+    var body: some View {
+        TabView {
+            AgentToolsSettingsView()
+                .tabItem {
+                    Label("Agent Tools", systemImage: "wrench.and.screwdriver")
+                }
+
+            SearchSettingsView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+        }
+        .frame(minWidth: 720, minHeight: 460)
+    }
+}
+
+private struct SearchSettingsView: View {
+    @Bindable private var prefs = SearchPreferencesStore.shared
+    @State private var excludedNamesText = ""
+    @State private var excludedGlobalPathsText = ""
+
+    var body: some View {
+        Form {
+            Section("Limits & Safety Guardrails") {
+                Picker("Default result limit", selection: $prefs.resultLimit) {
+                    ForEach(SearchOptions.limitPresets, id: \.self) { count in
+                        Text("\(count) matches").tag(count)
+                    }
+                }
+                .help("Stops streaming once this many valid matches are found. You can still load more inline.")
+
+                Picker("Search timeout", selection: $prefs.timeoutSeconds) {
+                    ForEach(SearchOptions.timeoutPresets, id: \.self) { seconds in
+                        Text("\(Int(seconds)) seconds").tag(seconds)
+                    }
+                }
+                .help("Prevents stalled Spotlight or disk walks from hanging the app; partial results are kept.")
+
+                Picker("Max scanned entries (walk fallback)", selection: $prefs.maxVisitedNodes) {
+                    ForEach(SearchOptions.maxVisitedPresets, id: \.self) { count in
+                        Text("\(NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)) items")
+                            .tag(count)
+                    }
+                }
+
+                Picker("Maximum folder depth", selection: $prefs.maxDepth) {
+                    Text("Unlimited").tag(0)
+                    Text("6 levels").tag(6)
+                    Text("10 levels").tag(10)
+                    Text("20 levels").tag(20)
+                }
+            }
+
+            Section("Progressive Scoping & Tabs") {
+                Toggle("Search current folder first while Global runs", isOn: $prefs.progressiveScoping)
+                    .help("Shows instant matches from your current folder on top while Global results stream underneath.")
+                Toggle("Open Global searches in a new tab automatically", isOn: $prefs.openGlobalInNewTab)
+                    .help("Switching to Global opens a dedicated Search Tab so you can keep browsing in your current tab. You can also press ⌘⇧F anytime.")
+            }
+
+            Section("Exclusions") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Excluded folder names (comma-separated)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $excludedNamesText, prompt: Text(".git, node_modules, DerivedData, …"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitExclusions)
+                        .onChange(of: excludedNamesText) { _, value in
+                            prefs.excludedNames = SearchPreferencesStore.parseCSVList(value)
+                        }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Excluded Global paths under Home (comma-separated)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $excludedGlobalPathsText, prompt: Text("Library/Caches, Library/CloudStorage, …"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commitExclusions)
+                        .onChange(of: excludedGlobalPathsText) { _, value in
+                            prefs.excludedGlobalRelativePaths = SearchPreferencesStore.parseCSVList(value)
+                        }
+                    Text("Skipped during Global searches to avoid cache storms and cloud downloads. Searching inside them directly still works.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Section {
+                HStack {
+                    Spacer()
+                    Button("Reset Search Defaults") {
+                        prefs.resetDefaults()
+                        syncTextFields()
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear(perform: syncTextFields)
+    }
+
+    private func syncTextFields() {
+        excludedNamesText = SearchPreferencesStore.formatCSVList(prefs.excludedNames)
+        excludedGlobalPathsText = SearchPreferencesStore.formatCSVList(prefs.excludedGlobalRelativePaths)
+    }
+
+    private func commitExclusions() {
+        prefs.excludedNames = SearchPreferencesStore.parseCSVList(excludedNamesText)
+        prefs.excludedGlobalRelativePaths = SearchPreferencesStore.parseCSVList(excludedGlobalPathsText)
+    }
+}
+
+private struct AgentToolsSettingsView: View {
     @Bindable private var tools = AgentToolsStore.shared
     @State private var selectedPresetID: String?
 
@@ -73,8 +191,6 @@ struct SettingsView: View {
                 )
             }
         }
-        .navigationTitle("Settings")
-        .frame(minWidth: 720, minHeight: 440)
         .onAppear {
             if selectedPresetID == nil {
                 selectedPresetID = tools.defaultPreset?.id ?? tools.presets.first?.id
@@ -209,15 +325,11 @@ final class SettingsWindowController {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
             window.title = "Arbor Settings"
             window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
-            window.setContentSize(NSSize(width: 780, height: 520))
+            window.setContentSize(NSSize(width: 780, height: 540))
             window.isReleasedWhenClosed = false
             self.window = window
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
-}
-
-#Preview {
-    SettingsView()
 }

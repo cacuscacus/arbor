@@ -1,216 +1,597 @@
 import Foundation
 import AppKit
-import Darwin
 
-enum SearchScope: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum SearchScope: String, CaseIterable, Identifiable, Sendable {
     case currentFolder = "This Folder"
     case global = "Global"
 
     var id: String { rawValue }
 }
 
-struct SearchHit: Identifiable, Hashable, Sendable {
+/// One search result with its `FileEntry` already materialized off the MainActor.
+nonisolated struct SearchHit: Identifiable, Hashable, Sendable {
     let id: ItemRef
-    let name: String
-    let parentPath: String
-    let isDirectory: Bool
-    let isPackage: Bool
+    let entry: FileEntry
+    let ring: SearchRing
 
-    var isBrowsable: Bool {
-        isDirectory && !isPackage
-    }
-
-    func asFileEntry() -> FileEntry {
-        LocalFileService.entry(at: id, location: parentPath)
-            ?? FileEntry(
-                id: id,
-                name: name,
-                isDirectory: isDirectory,
-                isPackage: isPackage,
-                isHidden: name.hasPrefix("."),
-                size: 0,
-                kind: isDirectory ? "Folder" : "Document",
-                modified: nil,
-                created: nil,
-                location: parentPath
-            )
-    }
+    var name: String { entry.name }
+    var parentPath: String { entry.location }
+    var isDirectory: Bool { entry.isDirectory }
+    var isPackage: Bool { entry.isPackage }
+    var isBrowsable: Bool { entry.isBrowsable }
 }
 
-/// Thread-safe cancellation bridge between a Task and its child `Process`.
-/// `Process` is not Sendable; the lock also closes the "cancel before start" race.
-nonisolated private final class SearchProcessHandle: @unchecked Sendable {
-    let process = Process()
-    private let lock = NSLock()
-    private var cancelled = false
-    private var started = false
+/// Progressive snapshot emitted while a search streams results from one or more rings.
+nonisolated struct SearchProgressUpdate: Sendable {
+    let hits: [SearchHit]
+    let countsByRing: [SearchRing: Int]
+    let activeBackend: SearchBackendKind
+    let isRunning: Bool
+    let stopReason: SearchStopReason?
+    let elapsedSeconds: Double
+}
 
-    func start() throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !cancelled else { throw CancellationError() }
-        try process.run()
-        started = true
+/// Thread-safe accumulator coordinating concurrent concentric rings and batched UI flushes.
+nonisolated private final class SearchStreamCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var merger: SearchRingMerger<SearchHit>
+    private var activeBackend: SearchBackendKind = .inMemory
+    private var stopReason: SearchStopReason?
+    private var dirtyCount = 0
+    private var lastEmit = ContinuousClock.now
+    private let startedAt = ContinuousClock.now
+    private let continuation: AsyncThrowingStream<SearchProgressUpdate, Error>.Continuation
+    private let flushBatchSize = 25
+    private let flushInterval: Duration = .milliseconds(65)
+
+    init(
+        limit: Int,
+        continuation: AsyncThrowingStream<SearchProgressUpdate, Error>.Continuation
+    ) {
+        self.merger = SearchRingMerger(limit: limit)
+        self.continuation = continuation
     }
 
-    func cancel() {
+    var isLimitReached: Bool {
         lock.lock()
-        cancelled = true
-        let running = started && process.isRunning
+        defer { lock.unlock() }
+        return merger.isLimitReached
+    }
+
+    var totalCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return merger.totalCount
+    }
+
+    func noteBackend(_ backend: SearchBackendKind) {
+        lock.lock()
+        // Prefer reporting the broadest active engine (Spotlight / fd / walk over inMemory).
+        if activeBackend == .inMemory || backend == .spotlight {
+            activeBackend = backend
+        }
         lock.unlock()
-        if running {
-            process.terminate()
+    }
+
+    func noteStopReason(_ reason: SearchStopReason) {
+        lock.lock()
+        // Keep the most actionable stop reason (limitReached > timedOut > nodeLimitReached > completed).
+        switch (stopReason, reason) {
+        case (_, .limitReached):
+            stopReason = reason
+        case (.limitReached, _):
+            break
+        case (_, .timedOut):
+            stopReason = reason
+        case (.timedOut, _):
+            break
+        case (_, .nodeLimitReached):
+            stopReason = reason
+        case (nil, _):
+            stopReason = reason
+        default:
+            break
+        }
+        lock.unlock()
+    }
+
+    /// Inserts a materialized hit and flushes a snapshot when batch/interval thresholds fire.
+    /// Returns `false` when the overall result limit has been reached (caller should cut off).
+    func append(canonicalPath: String, ring: SearchRing, hit: SearchHit) -> Bool {
+        var snapshot: SearchProgressUpdate?
+        let keepGoing: Bool
+
+        lock.lock()
+        let result = merger.insert(canonicalPath: canonicalPath, ring: ring, item: hit)
+        if result == .inserted {
+            dirtyCount += 1
+        }
+        keepGoing = !merger.isLimitReached
+        let now = ContinuousClock.now
+        if dirtyCount > 0 && (dirtyCount >= flushBatchSize || (now - lastEmit) >= flushInterval || !keepGoing) {
+            dirtyCount = 0
+            lastEmit = now
+            snapshot = makeSnapshotLocked(isRunning: true, finalReason: nil, now: now)
+        }
+        lock.unlock()
+
+        if let snapshot {
+            continuation.yield(snapshot)
+        }
+        return keepGoing
+    }
+
+    func flushRunning(backend: SearchBackendKind? = nil) {
+        lock.lock()
+        if let backend {
+            noteBackendLocked(backend)
+        }
+        let now = ContinuousClock.now
+        dirtyCount = 0
+        lastEmit = now
+        let snapshot = makeSnapshotLocked(isRunning: true, finalReason: nil, now: now)
+        lock.unlock()
+        continuation.yield(snapshot)
+    }
+
+    private func noteBackendLocked(_ backend: SearchBackendKind) {
+        if activeBackend == .inMemory || backend == .spotlight {
+            activeBackend = backend
         }
     }
 
-    var isCancelled: Bool {
+    func finish(defaultReason: SearchStopReason = .completed) {
         lock.lock()
-        defer { lock.unlock() }
-        return cancelled
-    }
-}
-
-/// Collector for a pipe read happening on another queue.
-nonisolated private final class SearchOutput: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-
-    func store(_ value: Data) {
-        lock.lock()
-        data = value
+        let finalReason: SearchStopReason
+        if merger.isLimitReached {
+            finalReason = .limitReached(limit: merger.limit)
+        } else {
+            finalReason = stopReason ?? defaultReason
+        }
+        let snapshot = makeSnapshotLocked(isRunning: false, finalReason: finalReason, now: ContinuousClock.now)
         lock.unlock()
+        continuation.yield(snapshot)
+        continuation.finish()
     }
 
-    var value: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return data
+    private func makeSnapshotLocked(
+        isRunning: Bool,
+        finalReason: SearchStopReason?,
+        now: ContinuousClock.Instant
+    ) -> SearchProgressUpdate {
+        let elapsed = startedAt.duration(to: now)
+        let seconds = Double(elapsed.components.seconds)
+            + Double(elapsed.components.attoseconds) / 1e18
+        return SearchProgressUpdate(
+            hits: merger.orderedItems,
+            countsByRing: merger.countsByRing,
+            activeBackend: activeBackend,
+            isRunning: isRunning,
+            stopReason: finalReason,
+            elapsedSeconds: max(0, seconds)
+        )
     }
 }
 
-/// Filename search for the macOS UI. Prefers `fd`, then Spotlight (`mdfind`), then a walk fallback.
-enum SearchService {
-    nonisolated static let resultLimit = 500
+/// Filename search for the macOS UI:
+/// - Streams results with early cutoff (`StreamingProcessRunner`) so `mdfind`/`fd` never buffer unbounded output.
+/// - Materializes `FileEntry` off the MainActor so sorting/rendering never stalls the UI.
+/// - Runs progressive concentric rings (Ring 0 in-memory folder → Ring 1 folder subtree → Ring 2 Global)
+///   when enabled, appending outer rings below inner rings so early results never jump.
+/// - Enforces hard timeouts, cycle-safe walks, and configurable exclusions/limits.
+nonisolated enum SearchService {
+    static let resultLimit = SearchOptions.defaultResultLimit
+    private static let localProvider = LocalFileProvider()
 
-    nonisolated static func search(
+    static func searchStream(
         query: String,
         scope: SearchScope,
         currentFolder: URL,
-        showHiddenFiles: Bool = false
+        seedEntries: [FileEntry] = [],
+        options: SearchOptions = SearchOptions()
+    ) -> AsyncThrowingStream<SearchProgressUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let worker = Task.detached(priority: .userInitiated) {
+                let pattern = FilenameSearchPattern(query)
+                let coordinator = SearchStreamCoordinator(
+                    limit: options.resultLimit,
+                    continuation: continuation
+                )
+                guard !pattern.isEmpty else {
+                    coordinator.finish(defaultReason: .completed)
+                    return
+                }
+
+                do {
+                    try await executeSearch(
+                        pattern: pattern,
+                        scope: scope,
+                        currentFolder: currentFolder.standardizedFileURL,
+                        seedEntries: seedEntries,
+                        options: options,
+                        coordinator: coordinator
+                    )
+
+                    // Literal fallback when a glob-like filename (e.g. `corchetes[1].txt`) yielded 0 hits.
+                    if coordinator.totalCount == 0, pattern.isGlob, !Task.isCancelled {
+                        try await executeSearch(
+                            pattern: pattern.literalFallback,
+                            scope: scope,
+                            currentFolder: currentFolder.standardizedFileURL,
+                            seedEntries: seedEntries,
+                            options: options,
+                            coordinator: coordinator
+                        )
+                    }
+
+                    guard !Task.isCancelled else {
+                        continuation.finish(throwing: CancellationError())
+                        return
+                    }
+                    coordinator.finish(defaultReason: .completed)
+                } catch is CancellationError {
+                    continuation.finish(throwing: CancellationError())
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                worker.cancel()
+            }
+        }
+    }
+
+    /// Convenience one-shot wrapper returning the final hits (used by callers/tests that don't stream).
+    static func search(
+        query: String,
+        scope: SearchScope,
+        currentFolder: URL,
+        showHiddenFiles: Bool = false,
+        options: SearchOptions? = nil
     ) async throws -> [SearchHit] {
-        let pattern = FilenameSearchPattern(query)
-        guard !pattern.isEmpty else { return [] }
+        var resolved = options ?? SearchOptions(showHiddenFiles: showHiddenFiles)
+        resolved.showHiddenFiles = showHiddenFiles
+        var latest: [SearchHit] = []
+        for try await update in searchStream(
+            query: query,
+            scope: scope,
+            currentFolder: currentFolder,
+            options: resolved
+        ) {
+            latest = update.hits
+        }
+        return latest
+    }
+
+    // MARK: - Concentric Ring Orchestration
+
+    private static func executeSearch(
+        pattern: FilenameSearchPattern,
+        scope: SearchScope,
+        currentFolder: URL,
+        seedEntries: [FileEntry],
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws {
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let displayRootPath = (scope == .global ? homeURL : currentFolder).path
+        let excludedNames = Set(options.excludedNames)
+
+        // Ring 0: Instant in-memory match against current folder's loaded children.
+        let shouldRunLocalRings = (scope == .currentFolder) || options.progressiveScoping
+        if shouldRunLocalRings, !seedEntries.isEmpty {
+            let folderPath = currentFolder.path
+            for entry in seedEntries {
+                try Task.checkCancellation()
+                guard SearchPathFilter.matchesFilename(entry.name, pattern: pattern) else { continue }
+                if SearchPathFilter.isExcluded(
+                    path: entry.fullPath,
+                    rootPath: folderPath,
+                    isGlobalRoot: false,
+                    excludedNames: excludedNames,
+                    excludedGlobalRelativePaths: options.excludedGlobalRelativePaths,
+                    showHiddenFiles: options.showHiddenFiles
+                ) {
+                    continue
+                }
+                let loc = SearchPathFilter.relativeParent(for: entry.fullPath, rootPath: displayRootPath)
+                let relEntry = entry.withLocation(loc)
+                let hit = SearchHit(id: entry.id, entry: relEntry, ring: .currentFolderDirect)
+                if !coordinator.append(canonicalPath: entry.fullPath, ring: .currentFolderDirect, hit: hit) {
+                    return
+                }
+            }
+            if coordinator.totalCount > 0 {
+                coordinator.flushRunning(backend: .inMemory)
+            }
+        }
 
         try Task.checkCancellation()
 
-        let root: URL = {
-            switch scope {
-            case .currentFolder:
-                return currentFolder.standardizedFileURL
-            case .global:
-                return FileManager.default.homeDirectoryForCurrentUser
-            }
-        }()
+        switch scope {
+        case .currentFolder:
+            try await searchSubtree(
+                pattern: pattern,
+                root: currentFolder,
+                displayRootPath: displayRootPath,
+                ring: .currentFolderSubtree,
+                isGlobalRoot: false,
+                options: options,
+                coordinator: coordinator
+            )
 
-        // Global: treat the Spotlight index like Finder does. `mdfind` answers
-        // in ~0.3 s where a cold `fd` walk of $HOME takes 5-15 s; `fd` remains
-        // the fallback when Spotlight is unavailable/disabled.
-        if scope == .global {
-            do {
-                let hits = try await searchWithSpotlight(pattern: pattern)
-                if !hits.isEmpty || !pattern.isGlob {
-                    return hits
+        case .global:
+            let runLocalSubtree = options.progressiveScoping && currentFolder.path != homeURL.path
+            if runLocalSubtree {
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await searchSubtree(
+                            pattern: pattern,
+                            root: currentFolder,
+                            displayRootPath: displayRootPath,
+                            ring: .currentFolderSubtree,
+                            isGlobalRoot: false,
+                            options: options,
+                            coordinator: coordinator
+                        )
+                    }
+                    group.addTask {
+                        try await searchGlobal(
+                            pattern: pattern,
+                            homeURL: homeURL,
+                            options: options,
+                            coordinator: coordinator
+                        )
+                    }
+                    try await group.waitForAll()
                 }
-                let literal = try await searchWithSpotlight(pattern: pattern.literalFallback)
-                return literal.isEmpty ? hits : literal
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                // Spotlight index off or mdfind failed — fall through to fd/walk.
+            } else {
+                try await searchGlobal(
+                    pattern: pattern,
+                    homeURL: homeURL,
+                    options: options,
+                    coordinator: coordinator
+                )
             }
         }
+    }
 
-        if let hits = try await searchWithFd(
-            pattern: pattern,
-            root: root,
-            showHiddenFiles: showHiddenFiles
-        ) {
-            guard hits.isEmpty, pattern.isGlob else { return hits }
-            if let literal = try await searchWithFd(
-                pattern: pattern.literalFallback,
-                root: root,
-                showHiddenFiles: showHiddenFiles
-            ), !literal.isEmpty {
-                return literal
-            }
-            return hits
+    // MARK: - Ring Runners
+
+    private static func searchGlobal(
+        pattern: FilenameSearchPattern,
+        homeURL: URL,
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws {
+        // Spotlight first for Global (fast metadata index, avoids cold disk walks & cloud downloads).
+        do {
+            let succeeded = try await searchWithSpotlight(
+                pattern: pattern,
+                homeURL: homeURL,
+                options: options,
+                coordinator: coordinator
+            )
+            if succeeded { return }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Spotlight unavailable or errored — fall through to bounded fd / cycle-safe walk.
         }
 
-        let hits = try await searchWithEnumerator(
+        try await searchSubtree(
             pattern: pattern,
-            root: root,
-            showHiddenFiles: showHiddenFiles
-        )
-        guard hits.isEmpty, pattern.isGlob else { return hits }
-        return try await searchWithEnumerator(
-            pattern: pattern.literalFallback,
-            root: root,
-            showHiddenFiles: showHiddenFiles
+            root: homeURL,
+            displayRootPath: homeURL.path,
+            ring: .global,
+            isGlobalRoot: true,
+            options: options,
+            coordinator: coordinator
         )
     }
 
-    // MARK: - fd
-
-    /// `fd` is ideal here: globs use its `--glob` matcher (same engine style as ripgrep),
-    /// substrings stay `--fixed-strings`. Both stay O(tree) with ignore rules and an early cap.
-    nonisolated private static func searchWithFd(
+    private static func searchSubtree(
         pattern: FilenameSearchPattern,
         root: URL,
-        showHiddenFiles: Bool
-    ) async throws -> [SearchHit]? {
+        displayRootPath: String,
+        ring: SearchRing,
+        isGlobalRoot: Bool,
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws {
+        let excludedNameSet = Set(options.excludedNames)
+        if let ranFd = try await searchWithFd(
+            pattern: pattern,
+            root: root,
+            displayRootPath: displayRootPath,
+            ring: ring,
+            isGlobalRoot: isGlobalRoot,
+            options: options,
+            excludedNameSet: excludedNameSet,
+            coordinator: coordinator
+        ), ranFd {
+            return
+        }
+
+        coordinator.flushRunning(backend: .walk)
+        let walkResult = try await CycleSafeDirectoryWalker.walk(
+            root: root,
+            pattern: pattern,
+            options: options,
+            isGlobalRoot: isGlobalRoot
+        ) { path in
+            emitPath(
+                path,
+                rootPath: root.path,
+                displayRootPath: displayRootPath,
+                ring: ring,
+                isGlobalRoot: isGlobalRoot,
+                options: options,
+                excludedNameSet: excludedNameSet,
+                coordinator: coordinator
+            )
+        }
+
+        if walkResult.stopReason != .completed {
+            coordinator.noteStopReason(walkResult.stopReason)
+        }
+    }
+
+    // MARK: - Spotlight (streaming + early cutoff)
+
+    private static func searchWithSpotlight(
+        pattern: FilenameSearchPattern,
+        homeURL: URL,
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws -> Bool {
+        let homePath = homeURL.path
+        let excludedNameSet = Set(options.excludedNames)
+        let namePredicate: String
+        switch pattern.kind {
+        case .substring(let text):
+            namePredicate = "kMDItemFSName == '*\(escapeSpotlightLiteral(text))*'cd"
+        case .glob(let glob):
+            namePredicate = "kMDItemFSName == '\(escapeSpotlightGlob(glob))'cd"
+        }
+
+        coordinator.flushRunning(backend: .spotlight)
+        let outcome = try await StreamingProcessRunner.run(
+            executable: "/usr/bin/mdfind",
+            arguments: [
+                "-0",
+                "-onlyin", homePath,
+                namePredicate,
+            ],
+            timeoutSeconds: options.timeoutSeconds,
+            preferNUL: true
+        ) { path in
+            emitPath(
+                path,
+                rootPath: homePath,
+                displayRootPath: homePath,
+                ring: .global,
+                isGlobalRoot: true,
+                options: options,
+                excludedNameSet: excludedNameSet,
+                coordinator: coordinator
+            )
+        }
+
+        switch outcome.reason {
+        case .earlyCutoff:
+            coordinator.noteStopReason(.limitReached(limit: options.resultLimit))
+            return true
+        case .timedOut:
+            coordinator.noteStopReason(.timedOut(seconds: options.timeoutSeconds))
+            return true
+        case .cancelled:
+            throw CancellationError()
+        case .completed:
+            return outcome.terminationStatus == 0
+        }
+    }
+
+    private static func escapeSpotlightLiteral(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "*", with: "\\*")
+            .replacingOccurrences(of: "?", with: "\\?")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private static func escapeSpotlightGlob(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    // MARK: - fd (streaming + early cutoff)
+
+    private static func searchWithFd(
+        pattern: FilenameSearchPattern,
+        root: URL,
+        displayRootPath: String,
+        ring: SearchRing,
+        isGlobalRoot: Bool,
+        options: SearchOptions,
+        excludedNameSet: Set<String>,
+        coordinator: SearchStreamCoordinator
+    ) async throws -> Bool? {
         guard let fd = resolveFdPath() else { return nil }
 
+        // Allow headroom above resultLimit because bundle internals are filtered out in-stream.
+        let fdCap = min(50_000, max(options.resultLimit * 3, options.resultLimit + 200))
         var arguments = [
             "--color=never",
             "--ignore-case",
-            // Finder-like: `.gitignore`d build outputs, logs and .env files are
-            // still real files. Heavy dependency/build trees stay excluded by
-            // name below so search does not descend into them.
             "--no-ignore",
-            // NUL-delimited output keeps filenames containing newlines intact.
             "--print0",
-            "--max-results", "\(resultLimit)",
-            "--exclude", ".git",
-            "--exclude", "node_modules",
-            "--exclude", "DerivedData",
-            "--exclude", "target",
-            "--exclude", ".build",
-            "--exclude", "Pods",
+            "--max-results", "\(fdCap)",
         ]
-        if showHiddenFiles {
+        if let maxDepth = options.maxDepth {
+            arguments.append(contentsOf: ["--max-depth", "\(maxDepth + 1)"])
+        }
+        for excluded in options.excludedNames where !excluded.isEmpty {
+            arguments.append(contentsOf: ["--exclude", excluded])
+        }
+        if isGlobalRoot {
+            for rel in options.excludedGlobalRelativePaths where !rel.isEmpty {
+                arguments.append(contentsOf: ["--exclude", rel])
+            }
+        }
+        if options.showHiddenFiles {
             arguments.append("--hidden")
         }
 
         let query: String
         switch pattern.kind {
         case .substring(let text):
-            // Literal substring anywhere in the path entry name / path as fd matches.
             arguments.append("--fixed-strings")
             query = text
         case .glob(let glob):
-            // Shell-style: `blabla*.json`, `*.swift`, `img-??.png`
             arguments.append("--glob")
             query = glob
         }
-
         arguments.append(contentsOf: [query, root.path])
 
-        let output = try await runProcess(executable: fd, arguments: arguments)
-        try Task.checkCancellation()
-        return parsePathLines(output, relativeTo: root)
+        coordinator.flushRunning(backend: .fd)
+        let outcome = try await StreamingProcessRunner.run(
+            executable: fd,
+            arguments: arguments,
+            timeoutSeconds: options.timeoutSeconds,
+            preferNUL: true
+        ) { path in
+            emitPath(
+                path,
+                rootPath: root.path,
+                displayRootPath: displayRootPath,
+                ring: ring,
+                isGlobalRoot: isGlobalRoot,
+                options: options,
+                excludedNameSet: excludedNameSet,
+                coordinator: coordinator
+            )
+        }
+
+        switch outcome.reason {
+        case .earlyCutoff:
+            coordinator.noteStopReason(.limitReached(limit: options.resultLimit))
+            return true
+        case .timedOut:
+            coordinator.noteStopReason(.timedOut(seconds: options.timeoutSeconds))
+            return true
+        case .cancelled:
+            throw CancellationError()
+        case .completed:
+            return outcome.terminationStatus == 0 || outcome.terminationStatus == 1
+        }
     }
 
-    nonisolated private static func resolveFdPath() -> String? {
+    private static func resolveFdPath() -> String? {
         let home = NSHomeDirectory()
         let candidates = [
             "/opt/homebrew/bin/fd",
@@ -222,224 +603,75 @@ enum SearchService {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    // MARK: - Spotlight
+    // MARK: - Off-main-thread materialization
 
-    /// Spotlight’s `kMDItemFSName` already speaks glob (`*` / `?`). Metadata index = fast for Global.
-    nonisolated private static func searchWithSpotlight(
-        pattern: FilenameSearchPattern
-    ) async throws -> [SearchHit] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let namePredicate: String
-        switch pattern.kind {
-        case .substring(let text):
-            // Wrap with * so "note" matches "my-note.txt". Escape glob mets in the literal.
-            namePredicate = "kMDItemFSName == '*\(escapeSpotlightLiteral(text))*'cd"
-        case .glob(let glob):
-            // Pass user wildcards through; only escape quotes / backslashes.
-            namePredicate = "kMDItemFSName == '\(escapeSpotlightGlob(glob))'cd"
+    private static func emitPath(
+        _ rawPath: String,
+        rootPath: String,
+        displayRootPath: String,
+        ring: SearchRing,
+        isGlobalRoot: Bool,
+        options: SearchOptions,
+        excludedNameSet: Set<String>,
+        coordinator: SearchStreamCoordinator
+    ) -> Bool {
+        guard !rawPath.isEmpty else { return true }
+        if coordinator.isLimitReached { return false }
+
+        // Trim trailing slash that `fd` appends to directories.
+        let path = rawPath.count > 1 && rawPath.hasSuffix("/")
+            ? String(rawPath.dropLast())
+            : rawPath
+
+        guard !SearchPathFilter.isInsidePackage(path) else { return true }
+        guard !SearchPathFilter.isExcluded(
+            path: path,
+            rootPath: rootPath,
+            isGlobalRoot: isGlobalRoot,
+            excludedNames: excludedNameSet,
+            excludedGlobalRelativePaths: options.excludedGlobalRelativePaths,
+            showHiddenFiles: options.showHiddenFiles
+        ) else {
+            return true
         }
 
-        let output = try await runProcess(
-            executable: "/usr/bin/mdfind",
-            arguments: [
-                // NUL-delimited so filenames with newlines survive.
-                "-0",
-                "-onlyin", home,
-                namePredicate,
-            ]
-        )
+        let url = URL(fileURLWithPath: path)
+        let item = LocalFileLocation.item(for: url)
+        let location = SearchPathFilter.relativeParent(for: path, rootPath: displayRootPath)
 
-        try Task.checkCancellation()
-        return parsePathLines(output, relativeTo: URL(fileURLWithPath: home))
-    }
-
-    /// Escape a literal fragment so embedded `*` / `?` are not wildcards.
-    nonisolated private static func escapeSpotlightLiteral(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "*", with: "\\*")
-            .replacingOccurrences(of: "?", with: "\\?")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-    }
-
-    /// Escape only quoting hazards; leave `*` / `?` / `[…]` as Spotlight globs.
-    nonisolated private static func escapeSpotlightGlob(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-    }
-
-    // MARK: - Fallback walk
-
-    nonisolated private static func searchWithEnumerator(
-        pattern: FilenameSearchPattern,
-        root: URL,
-        showHiddenFiles: Bool
-    ) async throws -> [SearchHit] {
-        let rootPath = root.path
-
-        return try await Task.detached(priority: .userInitiated) {
-            var hits: [SearchHit] = []
-            let fm = FileManager.default
-            var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
-            if !showHiddenFiles {
-                options.insert(.skipsHiddenFiles)
+        // Materialize full FileEntry on this background worker (zero MainActor disk I/O).
+        let entry: FileEntry
+        if let providerEntry = try? localProvider.entrySync(at: item) {
+            entry = FileEntry(providerEntry: providerEntry, location: location)
+        } else {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+                return true
             }
-            guard let enumerator = fm.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey, .nameKey],
-                options: options
-            ) else {
-                return []
-            }
-
-            let skipNames: Set<String> = [
-                ".git", "node_modules", "DerivedData", "target", ".build", "Pods",
-            ]
-
-            while let next = enumerator.nextObject() as? URL {
-                try Task.checkCancellation()
-
-                if skipNames.contains(next.lastPathComponent) {
-                    enumerator.skipDescendants()
-                    continue
-                }
-
-                let name = next.lastPathComponent
-                guard matchesFilename(name, pattern: pattern) else { continue }
-
-                let values = try? next.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
-                let isDirectory = values?.isDirectory ?? false
-                let isPackage = values?.isPackage ?? false
-                let parent = next.deletingLastPathComponent().path
-                let relativeParent: String = {
-                    if parent == rootPath { return "." }
-                    if parent.hasPrefix(rootPath + "/") {
-                        return String(parent.dropFirst(rootPath.count + 1))
-                    }
-                    return parent
-                }()
-
-                hits.append(
-                    SearchHit(
-                        id: LocalFileLocation.item(for: next),
-                        name: name,
-                        parentPath: relativeParent,
-                        isDirectory: isDirectory,
-                        isPackage: isPackage
-                    )
-                )
-
-                if hits.count >= resultLimit {
-                    break
-                }
-            }
-
-            return hits
-        }.value
-    }
-
-    nonisolated private static func matchesFilename(_ name: String, pattern: FilenameSearchPattern) -> Bool {
-        switch pattern.kind {
-        case .substring(let text):
-            return name.localizedCaseInsensitiveContains(text)
-        case .glob(let glob):
-            // POSIX fnmatch: same semantics as shell globs, case-insensitive.
-            return glob.withCString { patternC in
-                name.withCString { nameC in
-                    fnmatch(patternC, nameC, FNM_CASEFOLD) == 0
-                }
-            }
-        }
-    }
-
-    // MARK: - Helpers
-
-    /// Bundle-like path extensions Finder does not descend into.
-    nonisolated private static let packageExtensions: Set<String> = [
-        "app", "bundle", "framework", "plugin", "pkg",
-        "xcodeproj", "xcworkspace", "playground", "rtfd",
-    ]
-
-    /// `true` for paths *inside* a bundle. The bundle itself is not filtered,
-    /// so `Demo.app` can still be a search hit.
-    nonisolated private static func isInsidePackage(_ path: String) -> Bool {
-        let components = (path as NSString).pathComponents
-        guard components.count > 1 else { return false }
-        return components.dropLast().contains { component in
-            packageExtensions.contains((component as NSString).pathExtension.lowercased())
-        }
-    }
-
-    /// Output is NUL-delimited (`fd --print0`, `mdfind -0`). Fall back to
-    /// newlines only if a backend produced no NUL at all.
-    nonisolated private static func pathEntries(from output: String) -> [String] {
-        if output.contains("\0") {
-            return output.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
-        }
-        return output.split(whereSeparator: \.isNewline).map(String.init)
-    }
-
-    nonisolated private static func parsePathLines(_ output: String, relativeTo root: URL) -> [SearchHit] {
-        let rootPath = root.path
-        var hits: [SearchHit] = []
-        hits.reserveCapacity(min(resultLimit, 64))
-
-        for path in pathEntries(from: output) {
-            guard !path.isEmpty else { continue }
-            // Finder treats bundles as single items.
-            guard !isInsidePackage(path) else { continue }
-
-            let url = URL(fileURLWithPath: path)
-            var isDirectory = false
-            var isPackage = false
-            if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) {
-                isDirectory = values.isDirectory ?? false
-                isPackage = values.isPackage ?? false
-            } else {
-                var isDir: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { continue }
-                isDirectory = isDir.boolValue
-            }
-
-            let parent = url.deletingLastPathComponent().path
-            let relativeParent: String = {
-                if parent == rootPath { return "." }
-                if parent.hasPrefix(rootPath + "/") {
-                    return String(parent.dropFirst(rootPath.count + 1))
-                }
-                return parent
-            }()
-
-            hits.append(
-                SearchHit(
-                    id: LocalFileLocation.item(for: url),
-                    name: url.lastPathComponent,
-                    parentPath: relativeParent,
-                    isDirectory: isDirectory,
-                    isPackage: isPackage
-                )
+            let name = url.lastPathComponent
+            entry = FileEntry(
+                id: item,
+                name: name,
+                isDirectory: isDir.boolValue,
+                isPackage: false,
+                isHidden: name.hasPrefix("."),
+                size: 0,
+                kind: isDir.boolValue ? "Folder" : "Document",
+                modified: nil,
+                created: nil,
+                location: location
             )
-
-            if hits.count >= resultLimit {
-                break
-            }
         }
 
-        return hits
+        let hit = SearchHit(id: item, entry: entry, ring: ring)
+        return coordinator.append(canonicalPath: path, ring: ring, hit: hit)
     }
 
     #if DEBUG
-    /// Guards the NUL/package parsing rules (newline filenames, bundle internals)
-    /// and the literal fallback for names that look like globs.
-    nonisolated static func runSelfCheck() {
-        assert(pathEntries(from: "a\0b\0") == ["a", "b"], "NUL path parsing")
-        assert(pathEntries(from: "a\nb") == ["a", "b"], "newline fallback parsing")
-        assert(isInsidePackage("/Applications/Foo.app/Contents/Info.plist"))
-        assert(!isInsidePackage("/Applications/Foo.app"))
-        assert(!isInsidePackage("/Users/x/notes.txt"))
+    static func runSelfCheck() {
+        assert(SearchPathFilter.isInsidePackage("/Applications/Foo.app/Contents/Info.plist"))
+        assert(!SearchPathFilter.isInsidePackage("/Applications/Foo.app"))
+        assert(!SearchPathFilter.isInsidePackage("/Users/x/notes.txt"))
         assert(FilenameSearchPattern("*.png").isGlob)
         assert(FilenameSearchPattern("corchetes[1].txt").isGlob)
         assert(
@@ -448,82 +680,21 @@ enum SearchService {
         )
     }
     #endif
+}
 
-    nonisolated private static func runProcess(executable: String, arguments: [String]) async throws -> String {
-        let handle = SearchProcessHandle()
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if handle.isCancelled {
-                        continuation.resume(throwing: CancellationError())
-                        return
-                    }
-
-                    let process = handle.process
-                    process.executableURL = URL(fileURLWithPath: executable)
-                    process.arguments = arguments
-
-                    let stdout = Pipe()
-                    let stderr = Pipe()
-                    process.standardOutput = stdout
-                    process.standardError = stderr
-
-                    do {
-                        try handle.start()
-                    } catch {
-                        continuation.resume(throwing: error)
-                        return
-                    }
-
-                    // Drain both pipes *while* the child runs. Waiting for exit
-                    // first deadlocks as soon as the child fills the 64 KB pipe.
-                    let out = SearchOutput()
-                    let err = SearchOutput()
-                    let group = DispatchGroup()
-
-                    group.enter()
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        out.store(stdout.fileHandleForReading.readDataToEndOfFile())
-                        group.leave()
-                    }
-                    group.enter()
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        err.store(stderr.fileHandleForReading.readDataToEndOfFile())
-                        group.leave()
-                    }
-
-                    process.waitUntilExit()
-                    group.wait()
-
-                    if handle.isCancelled {
-                        continuation.resume(throwing: CancellationError())
-                        return
-                    }
-
-                    let text = String(data: out.value, encoding: .utf8) ?? ""
-
-                    // fd returns 1 when no matches — treat as empty success.
-                    if process.terminationStatus == 0
-                        || (executable.hasSuffix("/fd") && process.terminationStatus == 1)
-                    {
-                        continuation.resume(returning: text)
-                    } else {
-                        let message = String(data: err.value, encoding: .utf8) ?? ""
-                        continuation.resume(
-                            throwing: NSError(
-                                domain: "ArborSearch",
-                                code: Int(process.terminationStatus),
-                                userInfo: [
-                                    NSLocalizedDescriptionKey: message.isEmpty ? "Search failed" : message,
-                                ]
-                            )
-                        )
-                    }
-                }
-            }
-        } onCancel: {
-            handle.cancel()
-        }
+private nonisolated extension FileEntry {
+    func withLocation(_ newLocation: String) -> FileEntry {
+        FileEntry(
+            id: id,
+            name: name,
+            isDirectory: isDirectory,
+            isPackage: isPackage,
+            isHidden: isHidden,
+            size: size,
+            kind: kind,
+            modified: modified,
+            created: created,
+            location: newLocation
+        )
     }
 }

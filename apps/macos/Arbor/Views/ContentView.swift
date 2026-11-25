@@ -165,7 +165,10 @@ struct ContentView: View {
                         tab: tab,
                         favorites: favorites,
                         dragState: dragState,
-                        isActive: active
+                        isActive: active,
+                        onOpenSearchInTab: { sourcePane in
+                            promoteSearchToTab(from: sourcePane)
+                        }
                     )
                     .opacity(active ? 1 : 0)
                     .allowsHitTesting(active)
@@ -257,6 +260,11 @@ struct ContentView: View {
                 .keyboardShortcut("w", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
+
+            Button("") { openSearchTab() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .opacity(0)
+                .allowsHitTesting(false)
         }
     }
 
@@ -269,6 +277,37 @@ struct ContentView: View {
         let root = selectedTab?.navigation.current
             ?? LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser)
         let tab = BrowserTab(root: root)
+        tabs.append(tab)
+        selectedTabID = tab.id
+    }
+
+    /// ⌘⇧F: Focus an existing empty dedicated Search Tab, or open a new Global Search Tab
+    /// so long searches can run in the background while browsing other tabs.
+    private func openSearchTab() {
+        if let reusable = tabs.first(where: { $0.isDedicatedSearchTab && !$0.focusedPane.search.isActive }) {
+            selectedTabID = reusable.id
+            reusable.focusedPane.search.requestFocus()
+            return
+        }
+        let root = selectedTab?.navigation.current
+            ?? LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser)
+        let tab = BrowserTab(root: root)
+        tab.isDedicatedSearchTab = true
+        tab.focusedPane.search.scope = .global
+        tab.focusedPane.search.requestFocus()
+        tabs.append(tab)
+        selectedTabID = tab.id
+    }
+
+    /// Promotes an inline pane search into its own dedicated tab and restores the source pane to browsing.
+    private func promoteSearchToTab(from sourcePane: BrowserPane) {
+        let wasSearching = sourcePane.search.isSearching
+        let tab = BrowserTab(root: sourcePane.navigation.current)
+        tab.isDedicatedSearchTab = true
+        tab.focusedPane.search.adopt(from: sourcePane.search)
+        tab.focusedPane.search.needsResumeAfterAdopt = wasSearching
+        sourcePane.search.clear()
+        sourcePane.search.isPresented = false
         tabs.append(tab)
         selectedTabID = tab.id
     }
@@ -311,6 +350,8 @@ struct ContentView: View {
 
     private func closeTab(id: BrowserTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+
+        tabs[index].cancelActiveSearches()
 
         if tabs.count == 1 {
             NSApp.keyWindow?.close()
@@ -433,6 +474,7 @@ private struct TabDetailView: View {
     @Bindable var favorites: SidebarFavoritesStore
     var dragState: FileDragState
     var isActive: Bool
+    var onOpenSearchInTab: ((BrowserPane) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -445,7 +487,8 @@ private struct TabDetailView: View {
                             favorites: favorites,
                             dragState: dragState,
                             isActive: isActive && tab.focusedPaneID == pane.id,
-                            isVisible: isActive
+                            isVisible: isActive,
+                            onOpenSearchInTab: onOpenSearchInTab
                         )
                     }
                 }
@@ -456,7 +499,8 @@ private struct TabDetailView: View {
                     favorites: favorites,
                     dragState: dragState,
                     isActive: isActive,
-                    isVisible: isActive
+                    isVisible: isActive,
+                    onOpenSearchInTab: onOpenSearchInTab
                 )
             }
         }
@@ -472,6 +516,7 @@ private struct PaneBrowserHost: View {
     var isActive: Bool
     /// Selected tab (true for both split panes when the tab is showing).
     var isVisible: Bool
+    var onOpenSearchInTab: ((BrowserPane) -> Void)? = nil
 
     var body: some View {
         FileBrowserView(
@@ -480,9 +525,11 @@ private struct PaneBrowserHost: View {
             dragState: dragState,
             isActive: isActive,
             isVisible: isVisible,
+            isDedicatedSearchTab: tab.isDedicatedSearchTab,
             onOpenInSplit: { url in
                 tab.openInSplit(folder: url)
-            }
+            },
+            onOpenSearchInTab: onOpenSearchInTab
         )
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -673,13 +720,52 @@ private struct TabBarItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            SplitFolderTitleLabel(
-                tab: tab,
-                style: .tab,
-                allowsPaneFocusClicks: isSelected
-            )
-            .opacity(isSelected ? 1 : 0.85)
-            .frame(maxWidth: .infinity)
+            if let search = tab.activeSearch, search.isActive || search.isSearching {
+                HStack(spacing: 5) {
+                    if search.isSearching {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(search.isActive ? search.trimmedQuery : "Search")
+                        .font(.subheadline.weight(isSelected ? .medium : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let badge = search.badgeLabel {
+                        Text(badge)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.quaternary.opacity(0.8), in: Capsule())
+                    }
+                }
+                .opacity(isSelected ? 1 : 0.85)
+                .frame(maxWidth: .infinity)
+            } else if tab.isDedicatedSearchTab, tab.focusedPane.search.isPresented {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("Search")
+                        .font(.subheadline.weight(isSelected ? .medium : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .opacity(isSelected ? 1 : 0.85)
+                .frame(maxWidth: .infinity)
+            } else {
+                SplitFolderTitleLabel(
+                    tab: tab,
+                    style: .tab,
+                    allowsPaneFocusClicks: isSelected
+                )
+                .opacity(isSelected ? 1 : 0.85)
+                .frame(maxWidth: .infinity)
+            }
 
             Button(action: onClose) {
                 Image(systemName: "xmark")

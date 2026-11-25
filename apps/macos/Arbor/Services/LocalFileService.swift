@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-struct FileEntry: Identifiable, Hashable {
+nonisolated struct FileEntry: Identifiable, Hashable, Sendable {
     let id: ItemRef
     let name: String
     let isDirectory: Bool
@@ -44,7 +44,7 @@ struct FileEntry: Identifiable, Hashable {
         return "doc"
     }
 
-    static let dateFormatter: DateFormatter = {
+    nonisolated(unsafe) static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
@@ -108,7 +108,7 @@ struct FileDetails: Hashable {
 
 }
 
-extension FileEntry {
+nonisolated extension FileEntry {
     init(providerEntry: FileProviderEntry, location: String = ".") {
         id = providerEntry.id
         name = providerEntry.name

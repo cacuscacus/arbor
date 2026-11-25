@@ -30,13 +30,87 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 ## Phase 1 — Navigation & search
 
 - ✓ Favorites (sidebar, shared across windows, persisted)
-- ⬚ Recents, Volumes, Bookmarks, History
-- ✓ Back / Forward navigation stack
+- ⬚ Recents, Volumes (with Eject), Bookmarks, History
+- ✓ Back / Forward navigation stack (with scroll-position restore)
 - ⬚ Directory tree
 - ◐ Filename search (`fd` / Spotlight / walk in the macOS app; not yet driven by `arbor-core`)
 - ⬚ Query language: `kind:`, `ext:`, `size>`, `modified:`
 - ⬚ Virtual scrolling for large directories
 - ✓ Directory listing watchers (auto-refresh when the folder changes outside Arbor) — visible tab panes only, debounced
+
+### 1a — Search reliability, guardrails & progressive scoping
+
+Shipped in [**v1.8.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.8.0). Goal: search never hangs the UI, stays responsive on huge trees, and gives instant feedback even in Global mode. Every guardrail and behavior is configurable in **Settings → Search** (opt-in / customizable, never forced).
+
+- ✓ **Streaming + early cutoff in `SearchService`**: read incremental chunks from `mdfind` / `fd` and terminate the child process as soon as `resultLimit` valid hits (post-bundle filtering) are collected, instead of buffering full `stdout` to EOF
+- ✓ **Off-main-thread `FileEntry` materialization**: build `FileEntry` values on background workers (with cancellation checks) — remove synchronous `asFileEntry()` disk `stat()`/`resourceValues` calls from `@MainActor`
+- ✓ **Hard hang & loop protection**:
+  - Configurable per-search timeout (default `10s`) with `SIGTERM` → `SIGKILL` escalation; return partial results + "Continue (+10s)" action on timeout
+  - Node-visit cap (`maxVisited`), optional `maxDepth`, and `(st_dev, st_ino)` cycle tracking in BFS fallback directory walk (`CycleSafeDirectoryWalker`)
+  - Editable exclusion list with safe Global defaults (`~/Library/Caches`, `~/Library/CloudStorage`, `.Trash`, `.git`, `node_modules`, `DerivedData`, `target`, `.build`, `Pods`) to avoid triggering iCloud/cloud downloads or TCC storms
+  - Longer debounce on 1-character Global queries
+- ✓ **Progressive "staircase" / concentric-ring search (configurable, on by default)**:
+  - Even when **Global** is selected, resolve rings in parallel: Ring 0 (in-memory current folder children, ~1–10 ms) → Ring 1 (current folder subtree, ~20–80 ms) → Ring 2 (full Global)
+  - Deduplicate by canonical `ItemRef`; always keep outer-ring results *below* inner rings so early hits never jump under the cursor
+- ✓ **Informative search status UI**:
+  - Persistent status bar (`SearchStatusBanner`) showing active engine/scope, live elapsed time, match count / ring breakdown, and an explicit **Stop** button (preserving partial hits)
+  - Clear limit indicator (*"Showing first 500 matches"*) with inline **"Load up to 2,000"** / configurable limit presets (`200 / 500 / 2,000 / 5,000`)
+
+### 1b — Background Search Tabs
+
+Shipped in [**v1.8.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.8.0). Goal: long or deep searches never block the user from browsing other folders.
+
+- ✓ Lift search state from view-local `@State` into an `@Observable` `SearchSession` owned by `BrowserPane`
+- ✓ Hybrid workflow:
+  - `⌘F` stays lightweight and inline in the current pane, with an **`Open in Tab`** button to promote results into their own tab
+  - `⌘⇧F` opens (or focuses) a dedicated **Search Tab** (plus Settings toggle to open Global searches in a new tab automatically)
+- ✓ Tab pill shows search icon / live mini spinner while running + live hit badge (`124` / `500+`); closing the tab (`⌘W`) immediately cancels the underlying search process and frees memory
+
+### 1c — Content search (`grep` / `ripgrep`)
+
+Goal: fast, configurable text search inside files without turning Global search into an I/O storm.
+
+- ⬚ Mode toggle in search bar: **`Name` | `Content`**
+- ⬚ **Local / folder content search**: `rg --json` streaming (later promotable into `arbor-core` via `ignore` + `grep-searcher` + `grep-regex` to drop the external binary dependency), batching UI updates every ~80–120 ms
+- ⬚ **Global content search**: Spotlight `kMDItemTextContent` streaming by default (fast, indexes PDFs/docs, avoids cloud-file downloads) + explicit opt-in **Deep Scan (`rg`)** with strict exclusions and clear disk-scan notice
+- ⬚ **Sweet-spot limits in Settings → Search**:
+  - Max file size for content grep (default `5 MB`; presets `1 MB / 5 MB / 25 MB / Unlimited`)
+  - Respect `.gitignore` toggle (default ON for content, OFF for filename)
+  - Max matches per file / total result cap
+- ⬚ **Content-result UX**: show matching line snippet with highlight + line number; click for Quick Look / preview, double-click to open (or jump to line in editor), `Show Enclosing Folder` reveals and selects the hit
+
+### 1d — Optional local LLM term expansion (MLX)
+
+Goal: bridge vocabulary mismatches in filename & content search (e.g., `"factura luz"` → `edenor`, `receipt`, `electricity`, `invoice`; `"login timeout"` → `auth_session_expired`) completely offline on Apple Silicon — **strictly opt-in and off by default**.
+
+- ⬚ **Settings → Search → Smart Expansion (MLX)**:
+  - Master toggle (OFF by default — zero downloads or extra RAM unless enabled)
+  - User-selectable quantized model tiers: `0.6B` (fast / low RAM), `2B` / `4B` (balanced sweet spot), `9B` (high accuracy for 32+ GB Macs), plus custom model path/ID and quantization choice (`4-bit` / `8-bit`)
+  - Configurable idle unload TTL (e.g., unload weights from RAM after 2–5 min idle) and RAM budget guard
+- ⬚ **Pre-implementation benchmark**: run a reproducible local eval script (~25–30 Spanish/English/code queries) across `0.6B / 2B / 4B / 9B` in `4-bit` vs `8-bit` measuring TTFT, total latency, peak RAM, and term-expansion quality to pick sensible presets
+- ⬚ **Non-blocking, transparent UX & isolation**:
+  - Run MLX in an isolated helper process (`arbor-llm-helper` / XPC) so memory or Metal pressure never freezes or crashes the browser UI
+  - Literal search runs immediately; term expansion triggers asynchronously after typing pause (~400–500 ms) and cancels on new input
+  - Display expanded terms as editable chips/pills under the search bar (one click to remove noisy terms) with stopword filtering before feeding into `fd` / `rg`
+
+### 1e — Finder-parity UX & daily-driver polish
+
+High-leverage desktop UX improvements identified against macOS Finder (without cloning unnecessary Finder bloat):
+
+- ⬚ **Real Copy/Paste (`⌘C` / `⌘V` / `⌘⌥V`)**: extend `FileClipboard` beyond Cut-only and integrate with `NSPasteboard.general` so files copy/paste seamlessly between Arbor, Finder, Slack, Mail, etc.
+- ⬚ **macOS muscle-memory shortcuts**: move Trash from bare `Delete` to `⌘⌫` (plus `⌘⌥⌫` permanent delete), add `⌘⇧N` (New Folder), `⌘I` (Get Info), `⌘O` / `⌘↓` (Open), `⌘1` / `⌘2` (List / Icons), and **type-to-select** (type-ahead) in both List and Icon views
+- ⬚ **Sidebar Places cleanup**: wire `Volumes` (mounted disks/DMGs + Eject) and `Git Repositories` / `Recents`, or hide non-interactive placeholder rows until wired
+- ⬚ **Compact status bar**: item count, selection count + total size, and free disk space (toggleable or inline with the breadcrumb bar)
+- ⬚ **Everyday file actions & feedback**:
+  - Inline New Folder / New File creation (create + enter rename directly)
+  - **Compress (`.zip`) / Extract** and **Open With…** (via `NSWorkspace.urlsForApplications(toOpen:)`)
+  - Transfer progress indicator + cancel button for slow local copies and SFTP jobs
+  - Async recursive folder size calculation in `Get Info` (cancellable on close)
+- ⬚ **Listing & search polish**:
+  - ✓ `Show Enclosing Folder` available for both files and folders in search results, selecting and revealing the item (`pendingSelection`)
+  - Right-click column headers in List view to toggle visible columns
+  - Optional collapsible Preview/Inspector sidebar (`⌘⇧P`, reusing Quick Look / Markdown / code renderers) and/or Column View (`⌘3`)
+  - Clear feedback when invoking `⌘F` on unsupported remote locations (until Phase 6e remote search lands)
 
 ---
 

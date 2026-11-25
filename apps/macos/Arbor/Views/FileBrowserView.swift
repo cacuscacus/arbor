@@ -7,7 +7,9 @@ struct FileBrowserView: View {
     var dragState: FileDragState
     var isActive: Bool = true
     var isVisible: Bool = true
+    var isDedicatedSearchTab: Bool = false
     var onOpenInSplit: ((ItemRef) -> Void)? = nil
+    var onOpenSearchInTab: ((BrowserPane) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -18,7 +20,9 @@ struct FileBrowserView: View {
                     dragState: dragState,
                     isActive: isActive,
                     isVisible: isVisible,
+                    isDedicatedSearchTab: isDedicatedSearchTab,
                     onOpenInSplit: onOpenInSplit,
+                    onOpenSearchInTab: onOpenSearchInTab,
                     localPath: FileProviderRegistry.shared.intrinsicLocalURL(
                         for: pane.navigation.current
                     )
@@ -48,13 +52,17 @@ private struct LocalFileBrowserView: View {
     var isActive: Bool = true
     /// Tab is selected (both split panes can be visible). Drives live directory watching.
     var isVisible: Bool = true
+    var isDedicatedSearchTab: Bool = false
     /// Opens a folder in the other split pane (creates a split if needed).
     var onOpenInSplit: ((ItemRef) -> Void)? = nil
+    /// Promotes the active search into a dedicated Search Tab.
+    var onOpenSearchInTab: ((BrowserPane) -> Void)? = nil
     let localPath: URL?
 
     private var navigation: BrowserNavigation { pane.navigation }
     private var displaySettings: BrowserDisplaySettings { pane.displaySettings }
     private var undoStack: ArborUndoStack { pane.undoStack }
+    private var search: SearchSession { pane.search }
     private var capabilities: FileProviderCapabilities {
         FileProviderRegistry.shared.capabilities(for: navigation.current)
     }
@@ -87,15 +95,8 @@ private struct LocalFileBrowserView: View {
     @State private var renameErrorMessage: String?
     @State private var selectionMarkedAt = Date.distantPast
 
-    @State private var searchQuery = ""
-    @State private var searchScope: SearchScope = .currentFolder
-    @State private var searchHits: [SearchHit] = []
-    @State private var isSearching = false
-    @State private var searchError: String?
-    @State private var searchTask: Task<Void, Never>?
     @State private var listingTask: Task<Void, Never>?
     @State private var mutationTask: Task<Void, Never>?
-    @State private var isSearchPresented = false
     @State private var showsGoToFolder = false
     /// Item to select once a navigation finishes (Go to Folder on a file).
     @State private var pendingSelection: ItemRef?
@@ -104,17 +105,13 @@ private struct LocalFileBrowserView: View {
     @FocusState private var searchFocused: Bool
     @AppStorage(HiddenFilesPreference.key) private var showHiddenFiles = false
     @Environment(WindowBrowserSortStore.self) private var windowSort
+    @Environment(\.hasFloatingTabBar) private var hasFloatingTabBar
 
-    private var isSearchActive: Bool {
-        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var showsSearchPanel: Bool {
-        isSearchPresented || isSearchActive
-    }
+    private var isSearchActive: Bool { search.isActive }
+    private var showsSearchPanel: Bool { search.showsPanel }
 
     private var relativeRoot: ItemRef {
-        switch searchScope {
+        switch search.scope {
         case .currentFolder:
             return navigation.current
         case .global:
@@ -139,13 +136,26 @@ private struct LocalFileBrowserView: View {
     }
 
     private func refreshVisibleEntries() {
-        let base: [FileEntry] = {
-            if isSearchActive {
-                return searchHits.map { $0.asFileEntry() }
+        if isSearchActive {
+            // Entries are already materialized off-main-thread by SearchService.
+            // Keep concentric rings ordered (This Folder → Subfolders → Home) when
+            // progressive scoping is on so outer Global hits never jump above closer ones.
+            if search.scope == .global, SearchPreferencesStore.shared.progressiveScoping {
+                var grouped: [FileEntry] = []
+                grouped.reserveCapacity(search.hits.count)
+                for ring in SearchRing.allCases {
+                    let ringEntries = search.hits.compactMap { $0.ring == ring ? $0.entry : nil }
+                    if !ringEntries.isEmpty {
+                        grouped.append(contentsOf: BrowserSort.sorted(ringEntries, by: windowSort.descriptor))
+                    }
+                }
+                visibleEntries = grouped
+            } else {
+                visibleEntries = BrowserSort.sorted(search.hits.map(\.entry), by: windowSort.descriptor)
             }
-            return entries
-        }()
-        visibleEntries = BrowserSort.sorted(base, by: windowSort.descriptor)
+            return
+        }
+        visibleEntries = BrowserSort.sorted(entries, by: windowSort.descriptor)
     }
 
     var body: some View {
@@ -179,11 +189,34 @@ private struct LocalFileBrowserView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .id(
                     isSearchActive
-                        ? "search:\(searchScope)"
+                        ? "search:\(search.scope)"
                         : "\(navigation.current.volumeID.rawValue):\(navigation.current.path)"
                 )
 
-            if !isSearchActive {
+            if isSearchActive {
+                Divider()
+                SearchStatusBanner(
+                    scope: search.scope,
+                    folderName: pane.folderDisplayName,
+                    backend: search.activeBackend,
+                    isSearching: search.isSearching,
+                    hitCount: search.hits.count,
+                    countsByRing: search.countsByRing,
+                    stopReason: search.stopReason,
+                    elapsedSeconds: search.elapsedSeconds,
+                    activeLimit: search.activeLimit,
+                    onStop: stopSearch,
+                    onExpandLimit: { nextLimit in
+                        search.limitOverride = nextLimit
+                        scheduleSearch(immediate: true)
+                    },
+                    onContinueTimeout: {
+                        let base = search.timeoutOverride ?? SearchPreferencesStore.shared.timeoutSeconds
+                        search.timeoutOverride = base + 10
+                        scheduleSearch(immediate: true)
+                    }
+                )
+            } else {
                 Divider()
                 BreadcrumbBar(
                     directory: navigation.current,
@@ -197,15 +230,16 @@ private struct LocalFileBrowserView: View {
             if showsSearchPanel {
                 floatingSearchPanel
                     .padding(.top, 10)
-                    .padding(.trailing, 12)
+                    // Leave room for the floating single-tab `+` glass button when 1 tab is open.
+                    .padding(.trailing, hasFloatingTabBar ? 12 : 48)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.snappy(duration: 0.18), value: isSearchPresented && !isSearchActive)
+        .animation(.snappy(duration: 0.18), value: search.isPresented && !isSearchActive)
         .background {
             // Down/Up from the search field moves into the results (Finder-style).
             SearchResultKeyMonitor(
-                isActive: isSearchActive && searchFocused && !isSearching && !visibleEntries.isEmpty,
+                isActive: isSearchActive && searchFocused && !visibleEntries.isEmpty,
                 onMoveDown: { focusSearchResult(last: false) },
                 onMoveUp: { focusSearchResult(last: true) }
             )
@@ -258,9 +292,16 @@ private struct LocalFileBrowserView: View {
             .onChange(of: isActive) { _, active in
                 if active {
                     WindowLaunchCoordinator.noteFocusedItem(navigation.current)
-                    if !isSearchPresented {
+                    if search.isPresented {
+                        DispatchQueue.main.async { searchFocused = true }
+                    } else {
                         listFocused = true
                     }
+                }
+            }
+            .onChange(of: search.focusRequestToken) { _, _ in
+                if isActive {
+                    DispatchQueue.main.async { searchFocused = true }
                 }
             }
             .onChange(of: showsGoToFolder) { _, presented in
@@ -268,18 +309,30 @@ private struct LocalFileBrowserView: View {
                 // this pane, so Return/Space/Delete stop reaching the listing.
                 guard !presented else { return }
                 DispatchQueue.main.async {
-                    if !isSearchPresented { listFocused = true }
+                    if !search.isPresented { listFocused = true }
                 }
             }
             .onAppear {
                 reload()
-                if isActive, !isSearchPresented {
-                    listFocused = true
+                if search.isActive {
+                    refreshVisibleEntries()
+                    if search.needsResumeAfterAdopt || (search.hits.isEmpty && !search.isSearching) {
+                        search.needsResumeAfterAdopt = false
+                        scheduleSearch(immediate: true)
+                    }
+                }
+                if isActive {
+                    if search.isPresented {
+                        DispatchQueue.main.async { searchFocused = true }
+                    } else {
+                        listFocused = true
+                    }
                 }
             }
             .onDisappear {
                 listingTask?.cancel()
                 detailsTask?.cancel()
+                search.cancel()
                 QuickLookController.shared.close()
                 DocumentPreviewController.shared.close()
             }
@@ -305,7 +358,7 @@ private struct LocalFileBrowserView: View {
                     reload()
                 }
             }
-            .onChange(of: searchHits) { _, _ in
+            .onChange(of: search.hits) { _, _ in
                 refreshVisibleEntries()
             }
             .onChange(of: windowSort.descriptor) { _, _ in
@@ -320,12 +373,12 @@ private struct LocalFileBrowserView: View {
                 QuickLookController.shared.close()
                 DocumentPreviewController.shared.close()
                 selection = []
-                if searchScope == .currentFolder, isSearchActive {
+                if search.scope == .currentFolder, isSearchActive {
                     scheduleSearch()
                 } else if !isSearchActive {
                     reload()
                 }
-                if !searchFocused && !isSearchPresented {
+                if !searchFocused && !search.isPresented {
                     listFocused = true
                 }
             }
@@ -336,11 +389,22 @@ private struct LocalFileBrowserView: View {
                     cancelRename()
                 }
             }
-            .onChange(of: searchQuery) { _, _ in
+            .onChange(of: search.query) { _, _ in
+                search.resetOverrides()
                 refreshVisibleEntries()
                 scheduleSearch()
             }
-            .onChange(of: searchScope) { _, _ in
+            .onChange(of: search.scope) { oldScope, newScope in
+                search.resetOverrides()
+                if newScope == .global,
+                   oldScope != .global,
+                   !isDedicatedSearchTab,
+                   SearchPreferencesStore.shared.openGlobalInNewTab,
+                   let onOpenSearchInTab
+                {
+                    onOpenSearchInTab(pane)
+                    return
+                }
                 if isSearchActive {
                     scheduleSearch()
                 }
@@ -383,7 +447,7 @@ private struct LocalFileBrowserView: View {
                     cancelRename()
                     return .handled
                 }
-                if isSearchActive || searchFocused || isSearchPresented {
+                if isSearchActive || searchFocused || search.isPresented {
                     dismissSearch()
                     return .handled
                 }
@@ -422,12 +486,19 @@ private struct LocalFileBrowserView: View {
     }
 
     private var floatingSearchPanel: some View {
-        SearchBarView(
-            query: $searchQuery,
-            scope: $searchScope,
-            isSearching: isSearching,
-            resultCount: isSearchActive ? searchHits.count : nil,
+        @Bindable var searchBinding = search
+        return SearchBarView(
+            query: $searchBinding.query,
+            scope: $searchBinding.scope,
+            isSearching: search.isSearching,
+            resultCount: isSearchActive ? search.hits.count : nil,
+            activeLimit: search.activeLimit,
+            stopReason: search.stopReason,
             focus: $searchFocused,
+            onStop: stopSearch,
+            onOpenInTab: (!isDedicatedSearchTab && onOpenSearchInTab != nil)
+                ? { onOpenSearchInTab?(pane) }
+                : nil,
             onDismiss: dismissSearch
         )
         .padding(.horizontal, 10)
@@ -515,7 +586,7 @@ private struct LocalFileBrowserView: View {
         case .redo:
             performRedo()
         case .toggleSearch:
-            if isSearchPresented && !isSearchActive {
+            if search.isPresented && !isSearchActive {
                 dismissSearch()
             } else {
                 presentSearch()
@@ -539,7 +610,7 @@ private struct LocalFileBrowserView: View {
             ProgressView("Connecting…")
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let searchError, isSearchActive {
+        } else if let searchError = search.errorMessage, isSearchActive {
             ContentUnavailableView(
                 "Search failed",
                 systemImage: "exclamationmark.magnifyingglass",
@@ -648,11 +719,22 @@ private struct LocalFileBrowserView: View {
 
     @ViewBuilder
     private var searchBody: some View {
-        if isSearching && searchHits.isEmpty {
-            ProgressView("Searching…")
-                .controlSize(.small)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if searchHits.isEmpty {
+        if search.isSearching && search.hits.isEmpty {
+            VStack(spacing: 10) {
+                ProgressView("Searching \(search.scope == .global ? "Home" : pane.folderDisplayName)…")
+                    .controlSize(.small)
+                if search.elapsedSeconds >= 0.4 {
+                    Text(String(format: "%.1fs · %@", search.elapsedSeconds, search.activeBackend.rawValue))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Button("Stop", action: stopSearch)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if search.hits.isEmpty {
             ContentUnavailableView(
                 "No results",
                 systemImage: "magnifyingglass",
@@ -748,7 +830,7 @@ private struct LocalFileBrowserView: View {
     }
 
     private var emptySearchDescription: String {
-        switch searchScope {
+        switch search.scope {
         case .currentFolder:
             return "No matches in \(navigation.current.name)"
         case .global:
@@ -782,13 +864,12 @@ private struct LocalFileBrowserView: View {
             }
         }
 
-        if isSearchActive, targets.count == 1, let only = targets.first, !only.isBrowsable {
+        if isSearchActive, targets.count == 1, let only = targets.first, let parent = only.id.parent {
             Button("Show Enclosing Folder") {
                 commitContextSelection(anchor: anchor)
-                if let parent = only.id.parent {
-                    navigate(to: parent)
-                }
+                pendingSelection = only.id
                 clearSearch()
+                navigate(to: parent)
             }
         }
 
@@ -1062,67 +1143,34 @@ private struct LocalFileBrowserView: View {
 
     // MARK: - Search / navigation
 
-    private func scheduleSearch() {
-        searchTask?.cancel()
-
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            isSearching = false
-            searchHits = []
-            searchError = nil
-            reload()
-            return
-        }
-
-        let query = trimmed
-        let scope = searchScope
-        guard let folder = localPath else {
-            searchError = "Search is not available for this location."
-            isSearching = false
-            return
-        }
-        let includeHidden = showHiddenFiles
-        isSearching = true
-        searchError = nil
-
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(160))
-            guard !Task.isCancelled else { return }
-
-            do {
-                let hits = try await SearchService.search(
-                    query: query,
-                    scope: scope,
-                    currentFolder: folder,
-                    showHiddenFiles: includeHidden
-                )
-                guard !Task.isCancelled else { return }
-                searchHits = hits
-                pruneSelection(to: Set(hits.map(\.id)))
-                isSearching = false
-                // Results rebuild the grid below; keep caret in the search field.
-                if isSearchPresented {
+    private func scheduleSearch(immediate: Bool = false) {
+        search.schedule(
+            folder: localPath,
+            seedEntries: entries,
+            showHiddenFiles: showHiddenFiles,
+            immediate: immediate,
+            onComplete: { validIDs in
+                pruneSelection(to: validIDs)
+                if isActive, search.isPresented {
                     searchFocused = true
                 }
-            } catch is CancellationError {
-                // Superseded by a newer query.
-            } catch {
-                guard !Task.isCancelled else { return }
-                searchHits = []
-                selection = []
-                searchError = error.localizedDescription
-                isSearching = false
-                if isSearchPresented {
-                    searchFocused = true
-                }
+            },
+            onCleared: {
+                reload()
             }
-        }
+        )
+    }
+
+    /// Stops an in-flight search while preserving any partial hits already found.
+    private func stopSearch() {
+        search.stop()
+        pruneSelection(to: Set(search.hits.map(\.id)))
     }
 
     /// Finder behavior: Down/Up from the search field hands focus to the results,
     /// selecting the first/last hit so Return opens it.
     private func focusSearchResult(last: Bool) {
-        guard isSearchActive, !isSearching, !visibleEntries.isEmpty else { return }
+        guard isSearchActive, !visibleEntries.isEmpty else { return }
         searchFocused = false
         listFocused = true
         let index = last ? visibleEntries.index(before: visibleEntries.endIndex) : visibleEntries.startIndex
@@ -1130,11 +1178,7 @@ private struct LocalFileBrowserView: View {
     }
 
     private func clearSearch() {
-        searchTask?.cancel()
-        searchQuery = ""
-        searchHits = []
-        searchError = nil
-        isSearching = false
+        search.clear()
         searchFocused = false
         listFocused = true
         reload()
@@ -1142,7 +1186,7 @@ private struct LocalFileBrowserView: View {
 
     private func presentSearch() {
         guard localPath != nil, capabilities.contains(.search) else { return }
-        isSearchPresented = true
+        search.isPresented = true
         DispatchQueue.main.async {
             searchFocused = true
         }
@@ -1150,7 +1194,7 @@ private struct LocalFileBrowserView: View {
 
     private func dismissSearch() {
         clearSearch()
-        isSearchPresented = false
+        search.isPresented = false
         listFocused = true
     }
 

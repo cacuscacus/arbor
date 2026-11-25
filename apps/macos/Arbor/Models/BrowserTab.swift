@@ -20,6 +20,8 @@ final class BrowserPane: Identifiable {
     var displaySettings = BrowserDisplaySettings()
     /// Per-pane undo stack (same reason as `displaySettings`).
     var undoStack = ArborUndoStack()
+    /// Per-pane search state (kept on the pane so searches continue in background tabs).
+    let search = SearchSession()
 
     /// Bumped when the window toolbar wants the focused browser to run `pendingChromeCommand`.
     private(set) var chromeCommandToken = 0
@@ -68,6 +70,8 @@ final class BrowserTab: Identifiable {
     /// Always 1 pane (single) or 2 panes (horizontal split).
     private(set) var panes: [BrowserPane]
     var focusedPaneID: BrowserPane.ID
+    /// `true` when created via ⌘⇧F or "Open in Tab" for a dedicated search workflow.
+    var isDedicatedSearchTab = false
 
     init(id: UUID = UUID(), root: ItemRef) {
         self.id = id
@@ -108,9 +112,30 @@ final class BrowserTab: Identifiable {
     /// Navigation for the focused pane (sidebar / new-tab clone).
     var navigation: BrowserNavigation { focusedPane.navigation }
 
+    /// Active search session in this tab (prefers focused pane, falls back to any searching pane).
+    var activeSearch: SearchSession? {
+        if focusedPane.search.isActive || focusedPane.search.isSearching {
+            return focusedPane.search
+        }
+        return panes.first { $0.search.isActive || $0.search.isSearching }?.search
+    }
+
+    /// Immediately cancels all running search processes in this tab (called when closing a tab).
+    func cancelActiveSearches() {
+        for pane in panes {
+            pane.search.cancel()
+        }
+    }
+
     /// Plain title for accessibility / window title fallback.
     /// Split tabs list both pane folders: `left | right`.
     var title: String {
+        if let active = activeSearch, active.isActive {
+            return "Search: \(active.trimmedQuery)"
+        }
+        if isDedicatedSearchTab, focusedPane.search.isPresented {
+            return "Search"
+        }
         if isSplit {
             return panes.map(\.folderDisplayName).joined(separator: " | ")
         }
