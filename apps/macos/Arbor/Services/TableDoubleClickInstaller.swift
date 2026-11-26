@@ -4,6 +4,9 @@ import SwiftUI
 /// Hooks the detail file table for:
 /// - double-click → open
 /// - delayed second click on an already-selected name → rename
+/// - right-click on column headers → toggle visible columns (Finder-style)
+/// - type-to-select (type-ahead) with auto-scroll to matched row
+/// - programmatic scroll-to-row (e.g. inline New Folder / New File)
 ///
 /// On macOS 26 SwiftUI's `Table` is backed by `SwiftUIOutlineTableView` (an
 /// `NSOutlineView` subclass), so outline views are valid detail tables. The
@@ -13,15 +16,21 @@ import SwiftUI
 struct TableInteractionInstaller: NSViewRepresentable {
     var rowCount: Int
     var nameColumnIndex: Int = 0
+    var isTypeAheadActive: Bool = false
+    var displaySettings: BrowserDisplaySettings? = nil
+    var scrollToRowRequest: (token: UUID, row: Int)? = nil
     var isRowSelected: (Int) -> Bool
     var onDoubleClickRow: (Int) -> Void
     var onRenameRow: (Int) -> Void
+    var onTypeAhead: ((String) -> Int?)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             isRowSelected: isRowSelected,
             onDoubleClickRow: onDoubleClickRow,
-            onRenameRow: onRenameRow
+            onRenameRow: onRenameRow,
+            onTypeAhead: onTypeAhead,
+            displaySettings: displaySettings
         )
     }
 
@@ -35,20 +44,29 @@ struct TableInteractionInstaller: NSViewRepresentable {
         context.coordinator.isRowSelected = isRowSelected
         context.coordinator.onDoubleClickRow = onDoubleClickRow
         context.coordinator.onRenameRow = onRenameRow
+        context.coordinator.onTypeAhead = onTypeAhead
+        context.coordinator.displaySettings = displaySettings
         context.coordinator.rowCount = rowCount
         context.coordinator.nameColumnIndex = nameColumnIndex
+        context.coordinator.isTypeAheadActive = isTypeAheadActive
         nsView.coordinator = context.coordinator
         // Only re-hunt the table when the hook is missing; reassert the hooks on
         // every update because SwiftUI can rebuild the table's action wiring.
         nsView.scheduleInstallIfNeeded()
+        if let request = scrollToRowRequest {
+            context.coordinator.scrollToRowIfNeeded(token: request.token, row: request.row)
+        }
     }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, NSMenuDelegate {
         var isRowSelected: (Int) -> Bool
         var onDoubleClickRow: (Int) -> Void
         var onRenameRow: (Int) -> Void
+        var onTypeAhead: ((String) -> Int?)?
+        var displaySettings: BrowserDisplaySettings?
         var rowCount: Int = 0
         var nameColumnIndex: Int = 0
+        var isTypeAheadActive: Bool = false
 
         /// Row under the pointer at mouse-down — fallback when SwiftUI resets
         /// `clickedRow` to -1 before `doubleAction` fires.
@@ -57,20 +75,103 @@ struct TableInteractionInstaller: NSViewRepresentable {
         private var renameWorkItem: DispatchWorkItem?
         private var lastClickedRow: Int = -1
         private var lastClickAt: Date = .distantPast
+        private var lastHandledScrollToken: UUID?
         private weak var hookedTable: NSTableView?
+
+        lazy var headerMenu: NSMenu = {
+            let menu = NSMenu(title: "Columns")
+            menu.delegate = self
+            return menu
+        }()
 
         init(
             isRowSelected: @escaping (Int) -> Bool,
             onDoubleClickRow: @escaping (Int) -> Void,
-            onRenameRow: @escaping (Int) -> Void
+            onRenameRow: @escaping (Int) -> Void,
+            onTypeAhead: ((String) -> Int?)?,
+            displaySettings: BrowserDisplaySettings?
         ) {
             self.isRowSelected = isRowSelected
             self.onDoubleClickRow = onDoubleClickRow
             self.onRenameRow = onRenameRow
+            self.onTypeAhead = onTypeAhead
+            self.displaySettings = displaySettings
         }
 
         func attach(table: NSTableView) {
             hookedTable = table
+        }
+
+        func scrollToRowIfNeeded(token: UUID, row: Int) {
+            guard lastHandledScrollToken != token else { return }
+            lastHandledScrollToken = token
+            guard row >= 0, row < rowCount else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let table = self.hookedTable else { return }
+                guard row < table.numberOfRows else { return }
+                table.scrollRowToVisible(row)
+            }
+        }
+
+        func handleTypeAhead(_ characters: String) -> Bool {
+            guard isTypeAheadActive, let row = onTypeAhead?(characters) else { return false }
+            if let table = hookedTable, row >= 0, row < table.numberOfRows {
+                table.scrollRowToVisible(row)
+            }
+            return true
+        }
+
+        // MARK: - Column Header Context Menu (NSMenuDelegate)
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            guard menu === headerMenu, let settings = displaySettings else { return }
+            menu.removeAllItems()
+
+            let nameItem = NSMenuItem(title: BrowserColumn.name.title, action: nil, keyEquivalent: "")
+            nameItem.state = .on
+            nameItem.isEnabled = false
+            menu.addItem(nameItem)
+            menu.addItem(.separator())
+
+            for column in BrowserColumn.configurable {
+                let item = NSMenuItem(
+                    title: column.title,
+                    action: #selector(toggleColumn(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = column.rawValue
+                item.state = isColumnVisible(column, in: settings) ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        @objc private func toggleColumn(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? String,
+                  let column = BrowserColumn(rawValue: raw),
+                  let settings = displaySettings
+            else { return }
+            switch column {
+            case .kind: settings.showKind.toggle()
+            case .size: settings.showSize.toggle()
+            case .modified: settings.showModified.toggle()
+            case .created: settings.showCreated.toggle()
+            case .relativePath: settings.showRelativePath.toggle()
+            case .fullPath: settings.showFullPath.toggle()
+            case .name, .location: break
+            }
+        }
+
+        private func isColumnVisible(_ column: BrowserColumn, in settings: BrowserDisplaySettings) -> Bool {
+            switch column {
+            case .name, .location: return true
+            case .kind: return settings.showKind
+            case .size: return settings.showSize
+            case .modified: return settings.showModified
+            case .created: return settings.showCreated
+            case .relativePath: return settings.showRelativePath
+            case .fullPath: return settings.showFullPath
+            }
         }
 
         func captureMouseDown(in table: NSTableView, event: NSEvent) {
@@ -173,6 +274,7 @@ struct TableInteractionInstaller: NSViewRepresentable {
         private var attempts = 0
         private var dragMonitor: Any?
         private var mouseDownMonitor: Any?
+        private var keyDownMonitor: Any?
         /// Last logged geometry — avoid flooding `/tmp/arbor-dnd.log` on every SwiftUI update.
         private var lastGeomKey: String = ""
 
@@ -193,6 +295,9 @@ struct TableInteractionInstaller: NSViewRepresentable {
             }
             if let mouseDownMonitor {
                 NSEvent.removeMonitor(mouseDownMonitor)
+            }
+            if let keyDownMonitor {
+                NSEvent.removeMonitor(keyDownMonitor)
             }
         }
 
@@ -231,6 +336,44 @@ struct TableInteractionInstaller: NSViewRepresentable {
                     return event
                 }
             }
+            if keyDownMonitor == nil {
+                keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+                    guard let self else { return event }
+                    return self.handleKeyDown(event)
+                }
+            }
+        }
+
+        private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+            guard let coordinator,
+                  coordinator.isTypeAheadActive,
+                  let table = hookedTable,
+                  let window = table.window,
+                  window === event.window,
+                  window.isKeyWindow,
+                  window.attachedSheet == nil,
+                  Self.isEffectivelyVisible(table)
+            else { return event }
+
+            // Never steal keystrokes from text fields, search inputs, or the embedded terminal.
+            if let responder = window.firstResponder {
+                if responder is NSText || responder is NSTextField || responder is NSSearchField {
+                    return event
+                }
+                let typeName = String(describing: type(of: responder))
+                if typeName.contains("Terminal") {
+                    return event
+                }
+            }
+
+            let shortcutModifiers = event.modifierFlags.intersection([.command, .option, .control])
+            guard shortcutModifiers.isEmpty else { return event }
+
+            guard let printable = TypeAheadMatcher.printableInput(from: event.characters) else {
+                return event
+            }
+
+            return coordinator.handleTypeAhead(printable) ? nil : event
         }
 
         private func handleMouseDown(_ event: NSEvent) {
@@ -259,6 +402,9 @@ struct TableInteractionInstaller: NSViewRepresentable {
                     hookedTable.action = nil
                     hookedTable.doubleAction = nil
                 }
+                if hookedTable.headerView?.menu === coordinator.headerMenu {
+                    hookedTable.headerView?.menu = nil
+                }
             }
 
             hookedTable = table
@@ -271,6 +417,10 @@ struct TableInteractionInstaller: NSViewRepresentable {
             table.action = #selector(Coordinator.tableClicked(_:))
             table.doubleAction = #selector(Coordinator.tableDoubleClicked(_:))
             table.focusRingType = .none
+
+            if let coordinator, coordinator.displaySettings != nil {
+                table.headerView?.menu = coordinator.headerMenu
+            }
 
             if let scroll = table.enclosingScrollView {
                 // Leave scroll/clip content insets to SwiftUI + AppKit so the

@@ -15,11 +15,14 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
     var currentFolder: ItemRef?
     var showsLocation: Bool
     var dragState: FileDragState
+    var isTypeAheadActive: Bool = false
+    var scrollToItemRequest: (token: UUID, item: ItemRef)? = nil
     var onOpenRow: (FileEntry) -> Void
     var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
+    var onTypeAhead: ((String) -> Int?)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
 
@@ -171,6 +174,11 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
         .background {
             TableInteractionInstaller(
                 rowCount: entries.count,
+                isTypeAheadActive: isTypeAheadActive,
+                displaySettings: settings,
+                scrollToRowRequest: scrollToItemRequest.flatMap { request in
+                    entries.firstIndex(where: { $0.id == request.item }).map { (request.token, $0) }
+                },
                 isRowSelected: { row in
                     guard entries.indices.contains(row) else { return false }
                     return selection.contains(entries[row].id)
@@ -182,7 +190,8 @@ struct FileTableView<MenuContent: View, EmptyMenu: View>: View {
                 onRenameRow: { row in
                     guard entries.indices.contains(row) else { return }
                     onRequestRename(entries[row])
-                }
+                },
+                onTypeAhead: onTypeAhead
             )
         }
         .focusEffectDisabled()
@@ -198,6 +207,8 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     /// Drop destination for empty canvas / non-folder icons (pane's current folder).
     var currentFolder: ItemRef?
     var dragState: FileDragState
+    var isTypeAheadActive: Bool = false
+    var scrollToItemRequest: (token: UUID, item: ItemRef)? = nil
     var onOpen: (FileEntry) -> Void
     var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
@@ -205,6 +216,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
     var onCancelRename: () -> Void
     var onDeleteSelection: (() -> Void)? = nil
     var onQuickLook: (() -> Void)? = nil
+    var onTypeAhead: ((String) -> Int?)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
 
@@ -218,6 +230,8 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
             iconMetrics: iconMetrics,
             currentFolder: currentFolder,
             dragState: dragState,
+            isTypeAheadActive: isTypeAheadActive,
+            scrollToItemRequest: scrollToItemRequest,
             onOpen: onOpen,
             onTransfer: onTransfer,
             onRequestRename: onRequestRename,
@@ -225,6 +239,7 @@ struct FileIconView<MenuContent: View, EmptyMenu: View>: View {
             onCancelRename: onCancelRename,
             onDeleteSelection: onDeleteSelection,
             onQuickLook: onQuickLook,
+            onTypeAhead: onTypeAhead,
             contextMenu: contextMenu,
             emptySpaceMenu: emptySpaceMenu
         )

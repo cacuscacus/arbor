@@ -98,7 +98,7 @@ Shipped in [**v1.10.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.10.
 
 ### 1e — Finder-parity UX & daily-driver polish
 
-Core daily-driver polish shipped in [**v1.11.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.11.0):
+Shipped across [**v1.11.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.11.0) and [**v1.12.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.12.0):
 
 - ✓ **Real Copy/Paste (`⌘C` / `⌘X` / `⌘V` / `⌘⌥V`)**: extended `FileClipboard` with `NSPasteboard.general` integration so files copy/paste seamlessly between Arbor, Finder, Slack, Mail, etc., plus Finder's **Move Items Here** (`⌘⌥V`)
 - ✓ **macOS muscle-memory shortcuts**: moved Trash from bare `Delete` to **`⌘⌫`** (plus **`⌘⌥⌫`** permanent delete with confirmation), added **`⌘⇧N`** (New Folder), **`⌘I`** (Get Info), **`⌘O`** / **`⌘↓`** (Open), **`⌘1`** / **`⌘2`** (List / Icons)
@@ -108,12 +108,12 @@ Core daily-driver polish shipped in [**v1.11.0**](https://github.com/cacuscacus/
   - **Open With…** submenu via `NSWorkspace.urlsForApplications(toOpen:)` with native app icons and default-app marker
   - **Compress (`.zip`) / Extract** backed by `/usr/bin/ditto` with automatic collision-safe naming (`ArchiveService` + `ArchiveNameResolver`)
   - Clear feedback when invoking `⌘F` on unsupported remote locations (until Phase 6e remote search lands)
-- ⬚ **Remaining optional polish**:
-  - Type-to-select (type-ahead) in List and Icon views
-  - Inline New Folder / New File creation (create + enter rename directly)
-  - Transfer progress indicator + cancel button for slow local copies and SFTP jobs
-  - Async recursive folder size calculation in `Get Info`
-  - Right-click column headers in List view to toggle visible columns
+- ✓ **Type-to-select (type-ahead)** in List and Icon views (`TypeAheadMatcher` + auto-scroll)
+- ✓ **Inline New Folder / New File creation** (collision-safe create + immediate inline rename across local and SSH)
+- ✓ **Transfer progress indicator + cancel button** (`TransferProgressStore` + `TransferProgressOverlay`, preserving APFS same-volume cloning and streaming cross-volume large copies with live byte progress)
+- ✓ **Async recursive folder size calculation** in `Get Info` and multi-selection Info (`FolderSizeCalculator`, hardlink-deduplicated & symlink-loop safe)
+- ✓ **Right-click column headers** in List view to toggle visible columns
+- ⬚ **Future view modes (optional)**:
   - Optional collapsible Preview/Inspector sidebar (`⌘⇧P`) and/or Column View (`⌘3`)
 
 ---

@@ -11,6 +11,8 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
     var iconMetrics: IconViewMetrics
     var currentFolder: ItemRef?
     var dragState: FileDragState
+    var isTypeAheadActive: Bool = false
+    var scrollToItemRequest: (token: UUID, item: ItemRef)? = nil
     var onOpen: (FileEntry) -> Void
     var onTransfer: ([ItemRef], ItemRef, FileTransferOperation) -> Void
     var onRequestRename: (FileEntry) -> Void
@@ -18,6 +20,7 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
     var onCancelRename: () -> Void
     var onDeleteSelection: (() -> Void)? = nil
     var onQuickLook: (() -> Void)? = nil
+    var onTypeAhead: ((String) -> Int?)? = nil
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
     @ViewBuilder var emptySpaceMenu: () -> EmptyMenu
     @Environment(\.hasFloatingTabBar) private var hasFloatingTabBar
@@ -98,6 +101,9 @@ struct IconCollectionView<MenuContent: View, EmptyMenu: View>: NSViewRepresentab
         coordinator.syncEntries(entries)
         coordinator.syncSelection(selection)
         coordinator.syncRename(renamingItem: renamingItem, draft: renameDraft)
+        if let request = scrollToItemRequest {
+            coordinator.scrollToItemIfNeeded(token: request.token, item: request.item)
+        }
     }
 }
 
@@ -113,6 +119,8 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     private var lastMetrics: IconViewMetrics?
     private var lastFolder: ItemRef?
     private var pendingScrollToTop = false
+    private var lastHandledScrollToken: UUID?
+    private var isTypeAheadActive = false
 
     private var getSelection: (() -> Set<ItemRef>) = { [] }
     private var setSelection: ((Set<ItemRef>) -> Void) = { _ in }
@@ -127,6 +135,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
     private var onTransfer: (([ItemRef], ItemRef, FileTransferOperation) -> Void)?
     private var onDeleteSelection: (() -> Void)?
     private var onQuickLook: (() -> Void)?
+    private var onTypeAhead: ((String) -> Int?)?
     private var currentFolder: ItemRef?
     private var makeItemMenu: ((FileEntry) -> AnyView)?
     private var makeEmptyMenu: (() -> AnyView)?
@@ -141,6 +150,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         setRenameDraft = { parent.renameDraft = $0 }
         iconMetrics = parent.iconMetrics
         dragState = parent.dragState
+        isTypeAheadActive = parent.isTypeAheadActive
         onOpen = parent.onOpen
         onRequestRename = parent.onRequestRename
         onCommitRename = parent.onCommitRename
@@ -148,6 +158,7 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         onTransfer = parent.onTransfer
         onDeleteSelection = parent.onDeleteSelection
         onQuickLook = parent.onQuickLook
+        onTypeAhead = parent.onTypeAhead
         if currentFolder != parent.currentFolder {
             if lastFolder != nil {
                 pendingScrollToTop = true
@@ -394,6 +405,32 @@ final class IconCollectionCoordinator: NSObject, NSCollectionViewDataSource, NSC
         onQuickLook?()
     }
 
+    func handleTypeAhead(_ characters: String) -> Bool {
+        guard isTypeAheadActive, let index = onTypeAhead?(characters) else { return false }
+        scrollToIndex(index)
+        return true
+    }
+
+    func scrollToItemIfNeeded(token: UUID, item: ItemRef) {
+        guard lastHandledScrollToken != token else { return }
+        guard let index = indexByItem[item] else { return }
+        lastHandledScrollToken = token
+        scrollToIndex(index)
+    }
+
+    private func scrollToIndex(_ index: Int) {
+        guard let collectionView, entries.indices.contains(index) else { return }
+        let path = IndexPath(item: index, section: 0)
+        DispatchQueue.main.async { [weak collectionView] in
+            guard let collectionView else { return }
+            if let attrs = collectionView.layoutAttributesForItem(at: path) {
+                collectionView.scrollToVisible(attrs.frame.insetBy(dx: -8, dy: -8))
+            } else {
+                collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+            }
+        }
+    }
+
     // MARK: Collection drag-and-drop (drop onto folders)
 
     /// Folder currently under the drag, highlighted so the target is visible.
@@ -510,6 +547,7 @@ protocol IconCollectionEventHandling: AnyObject {
     func openSelection()
     func deleteSelection()
     func quickLookSelection()
+    func handleTypeAhead(_ characters: String) -> Bool
 }
 
 final class IconCollectionNSView: NSCollectionView {
@@ -576,11 +614,22 @@ final class IconCollectionNSView: NSCollectionView {
         switch event.keyCode {
         case 36, 76: // Return / keypad Enter
             eventHandler?.openSelection()
-        case 51, 117: // Delete / Forward Delete
-            eventHandler?.deleteSelection()
+        case 51, 117: // Delete / Forward Delete — require ⌘ (Finder-style)
+            if event.modifierFlags.contains(.command) {
+                eventHandler?.deleteSelection()
+            } else {
+                super.keyDown(with: event)
+            }
         case 49: // Space -> Quick Look (Finder)
             eventHandler?.quickLookSelection()
         default:
+            let shortcutModifiers = event.modifierFlags.intersection([.command, .option, .control])
+            if shortcutModifiers.isEmpty,
+               let printable = TypeAheadMatcher.printableInput(from: event.characters),
+               eventHandler?.handleTypeAhead(printable) == true
+            {
+                return
+            }
             super.keyDown(with: event)
         }
     }
@@ -878,10 +927,11 @@ class IconCollectionItem: NSCollectionViewItem, NSTextFieldDelegate, NSDraggingS
         label.isHidden = active
         if active {
             renameField.stringValue = draft
+            let isDir = entry?.isDirectory == true && entry?.isPackage == false
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.view.window?.makeFirstResponder(self.renameField)
-                self.renameField.currentEditor()?.selectAll(nil)
+                RenameTextField.selectName(in: self.renameField, isDirectory: isDir)
             }
         }
     }

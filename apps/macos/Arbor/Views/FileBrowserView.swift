@@ -86,14 +86,14 @@ private struct LocalFileBrowserView: View {
     @State private var transferErrorTitle = "Transfer Failed"
     @State private var transferErrorMessage: String?
     @State private var permanentDeleteTargets: [FileEntry] = []
-    @State private var createDialog: CreateItemDialog?
-    @State private var newItemName = ""
     @State private var createErrorMessage: String?
     @State private var undoErrorMessage: String?
     @State private var renamingItem: ItemRef?
     @State private var renameDraft = ""
     @State private var renameErrorMessage: String?
     @State private var selectionMarkedAt = Date.distantPast
+    @State private var typeAheadMatcher = TypeAheadMatcher()
+    @State private var scrollToItemRequest: (token: UUID, item: ItemRef)?
 
     @State private var listingTask: Task<Void, Never>?
     @State private var mutationTask: Task<Void, Never>?
@@ -166,13 +166,10 @@ private struct LocalFileBrowserView: View {
             .modifier(FileBrowserAlertsModifier(
                 transferErrorTitle: transferErrorTitle,
                 transferErrorMessage: $transferErrorMessage,
-                createDialog: $createDialog,
-                newItemName: $newItemName,
                 createErrorMessage: $createErrorMessage,
                 undoErrorMessage: $undoErrorMessage,
                 renameErrorMessage: $renameErrorMessage,
                 permanentDeleteTargets: $permanentDeleteTargets,
-                onConfirmCreate: confirmCreateItem,
                 onConfirmPermanentDelete: permanentlyDeletePendingItems
             ))
     }
@@ -378,6 +375,7 @@ private struct LocalFileBrowserView: View {
             }
             .onChange(of: navigation.current) { _, _ in
                 cancelRename()
+                typeAheadMatcher.reset()
                 // A folder change invalidates whatever preview is showing.
                 QuickLookController.shared.close()
                 DocumentPreviewController.shared.close()
@@ -839,6 +837,33 @@ private struct LocalFileBrowserView: View {
         }
     }
 
+    private var isTypeAheadActive: Bool {
+        isActive
+            && !searchFocused
+            && renamingItem == nil
+            && !showsGoToFolder
+            && details == nil
+            && multiInfo == nil
+            && quickDiffRequest == nil
+    }
+
+    private func handleTypeAhead(_ characters: String) -> Int? {
+        guard isTypeAheadActive, !visibleEntries.isEmpty else { return nil }
+        let currentIndex = selection.count == 1
+            ? visibleEntries.firstIndex(where: { selection.contains($0.id) })
+            : nil
+        guard let matched = typeAheadMatcher.match(
+            typing: characters,
+            at: Date(),
+            candidates: visibleEntries.map(\.name),
+            currentIndex: currentIndex
+        ) else {
+            return nil
+        }
+        selection = [visibleEntries[matched].id]
+        return matched
+    }
+
     @ViewBuilder
     private func browserBody(entries: [FileEntry], showsLocation: Bool) -> some View {
         switch displaySettings.viewMode {
@@ -854,6 +879,8 @@ private struct LocalFileBrowserView: View {
                 currentFolder: isSearchActive ? nil : navigation.current,
                 showsLocation: showsLocation,
                 dragState: dragState,
+                isTypeAheadActive: isTypeAheadActive,
+                scrollToItemRequest: scrollToItemRequest,
                 onOpenRow: { entry in
                     cancelRename()
                     openDoubleClicked(entry)
@@ -862,6 +889,7 @@ private struct LocalFileBrowserView: View {
                 onRequestRename: handleNameClick,
                 onCommitRename: commitRename,
                 onCancelRename: cancelRename,
+                onTypeAhead: handleTypeAhead,
                 contextMenu: { entry in entryContextMenu(anchor: entry) },
                 emptySpaceMenu: { emptySpaceContextMenu }
             )
@@ -874,6 +902,8 @@ private struct LocalFileBrowserView: View {
                 iconMetrics: displaySettings.iconMetrics,
                 currentFolder: isSearchActive ? nil : navigation.current,
                 dragState: dragState,
+                isTypeAheadActive: isTypeAheadActive,
+                scrollToItemRequest: scrollToItemRequest,
                 onOpen: { entry in
                     cancelRename()
                     openDoubleClicked(entry)
@@ -884,6 +914,7 @@ private struct LocalFileBrowserView: View {
                 onCancelRename: cancelRename,
                 onDeleteSelection: { _ = moveSelectionToTrash() },
                 onQuickLook: { _ = toggleQuickLook() },
+                onTypeAhead: handleTypeAhead,
                 contextMenu: { entry in entryContextMenu(anchor: entry) },
                 emptySpaceMenu: { emptySpaceContextMenu }
             )
@@ -1514,7 +1545,7 @@ private struct LocalFileBrowserView: View {
         let destination = destinationItem
 
         mutationTask = Task {
-            let outcome = await FileTransferService.transfer(
+            let outcome = await FileTransferService.trackedTransfer(
                 sources,
                 into: destination,
                 operation: operation
@@ -1689,19 +1720,16 @@ private struct LocalFileBrowserView: View {
     }
 
     private func beginCreateItem(_ kind: CreateItemKind) {
-        createDialog = CreateItemDialog(kind: kind)
-        newItemName = kind.defaultName
-    }
+        guard capabilities.contains(.create), !isSearchActive else { return }
+        cancelRename()
+        typeAheadMatcher.reset()
 
-    private func confirmCreateItem() {
-        guard capabilities.contains(.create) else { return }
-        guard let createDialog else { return }
-        let name = newItemName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-
-        let kind = createDialog.kind
         let parent = navigation.current
-        self.createDialog = nil
+        let candidateName = UniqueItemNameResolver.uniqueName(
+            preferred: kind.defaultName,
+            existingNames: Set(entries.map(\.name)),
+            isDirectory: kind == .folder
+        )
 
         mutationTask = Task {
             do {
@@ -1710,15 +1738,23 @@ private struct LocalFileBrowserView: View {
                 let isDirectory: Bool
                 switch kind {
                 case .folder:
-                    created = try await provider.createDirectory(in: parent, name: name)
+                    created = try await provider.createDirectory(in: parent, name: candidateName)
                     isDirectory = true
                 case .file:
-                    created = try await provider.createFile(in: parent, name: name, contents: Data())
+                    created = try await provider.createFile(in: parent, name: candidateName, contents: Data())
                     isDirectory = false
                 }
                 undoStack.register(.create(item: created.id, isDirectory: isDirectory))
-                reload()
-                selection = [created.id]
+
+                let newEntry = FileEntry(providerEntry: created)
+                if !entries.contains(where: { $0.id == newEntry.id }) {
+                    entries.append(newEntry)
+                    refreshVisibleEntries()
+                }
+                selection = [newEntry.id]
+                scrollToItemRequest = (UUID(), newEntry.id)
+                renameDraft = newEntry.name
+                renamingItem = newEntry.id
                 BrowserListingDidChange.post(folders: [parent])
             } catch {
                 createErrorMessage = error.localizedDescription
@@ -1965,37 +2001,13 @@ private enum CreateItemKind {
     }
 }
 
-private struct CreateItemDialog: Identifiable {
-    let id = UUID()
-    let kind: CreateItemKind
-
-    var title: String {
-        switch kind {
-        case .folder: return "New Folder"
-        case .file: return "New Empty File"
-        }
-    }
-
-    var placeholder: String { "Name" }
-
-    var message: String {
-        switch kind {
-        case .folder: return "Enter a name for the new folder."
-        case .file: return "Enter a name for the new file."
-        }
-    }
-}
-
 private struct FileBrowserAlertsModifier: ViewModifier {
     var transferErrorTitle: String
     @Binding var transferErrorMessage: String?
-    @Binding var createDialog: CreateItemDialog?
-    @Binding var newItemName: String
     @Binding var createErrorMessage: String?
     @Binding var undoErrorMessage: String?
     @Binding var renameErrorMessage: String?
     @Binding var permanentDeleteTargets: [FileEntry]
-    var onConfirmCreate: () -> Void
     var onConfirmPermanentDelete: () -> Void
 
     func body(content: Content) -> some View {
@@ -2007,20 +2019,6 @@ private struct FileBrowserAlertsModifier: ViewModifier {
                 Button("OK", role: .cancel) { transferErrorMessage = nil }
             } message: {
                 Text(transferErrorMessage ?? "")
-            }
-            .alert(
-                createDialog?.title ?? "New Item",
-                isPresented: Binding(
-                    get: { createDialog != nil },
-                    set: { if !$0 { createDialog = nil } }
-                )
-            ) {
-                TextField(createDialog?.placeholder ?? "Name", text: $newItemName)
-                Button("Create", action: onConfirmCreate)
-                    .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Cancel", role: .cancel) { createDialog = nil }
-            } message: {
-                Text(createDialog?.message ?? "")
             }
             .alert("Could Not Create Item", isPresented: Binding(
                 get: { createErrorMessage != nil },
@@ -2070,7 +2068,7 @@ struct MultiSelectionInfo: Identifiable {
 
     var totalSize: UInt64 {
         entries.reduce(into: UInt64(0)) { partial, entry in
-            if !entry.isDirectory || entry.isPackage {
+            if !entry.isDirectory {
                 partial += entry.size
             }
         }
@@ -2080,6 +2078,24 @@ struct MultiSelectionInfo: Identifiable {
 private struct MultiSelectionInfoView: View {
     let info: MultiSelectionInfo
     @Environment(\.dismiss) private var dismiss
+    @State private var folderBytes: UInt64 = 0
+    @State private var isCalculatingFolders = false
+
+    private var localFolderURLs: [URL] {
+        info.entries.compactMap { entry in
+            guard entry.isDirectory else { return nil }
+            return FileProviderRegistry.shared.intrinsicLocalURL(for: entry.id)
+        }
+    }
+
+    private var displayedSize: String {
+        let total = info.totalSize + folderBytes
+        let formatted = ByteCountFormatter.string(
+            fromByteCount: Int64(min(total, UInt64(Int64.max))),
+            countStyle: .file
+        )
+        return isCalculatingFolders ? "Calculating… \(formatted)" : formatted
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -2088,10 +2104,16 @@ private struct MultiSelectionInfoView: View {
 
             LabeledContent("Folders", value: "\(info.folderCount)")
             LabeledContent("Files", value: "\(info.fileCount)")
-            LabeledContent(
-                "Size",
-                value: ByteCountFormatter.string(fromByteCount: Int64(info.totalSize), countStyle: .file)
-            )
+            LabeledContent("Size") {
+                HStack(spacing: 6) {
+                    if isCalculatingFolders {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Text(displayedSize)
+                        .monospacedDigit()
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -2102,7 +2124,27 @@ private struct MultiSelectionInfoView: View {
             }
         }
         .padding(20)
-        .frame(width: 320, height: 200)
+        .frame(width: 340, height: 210)
+        .task(id: info.id) {
+            let urls = localFolderURLs
+            guard !urls.isEmpty else { return }
+            isCalculatingFolders = true
+            var accumulated: UInt64 = 0
+            for url in urls {
+                if Task.isCancelled { break }
+                let base = accumulated
+                let final = await FolderSizeCalculator.calculate(url: url) { snapshot in
+                    Task { @MainActor in
+                        self.folderBytes = base + snapshot.totalBytes
+                    }
+                }
+                accumulated += final.totalBytes
+                folderBytes = accumulated
+            }
+            if !Task.isCancelled {
+                isCalculatingFolders = false
+            }
+        }
     }
 }
 

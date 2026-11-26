@@ -191,6 +191,9 @@ struct ContentView: View {
                     detailTabChrome
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                TransferProgressOverlay()
+            }
         }
         // Automatic style picks up Liquid Glass sidebar on Tahoe.
         .navigationSplitViewStyle(.automatic)
@@ -325,7 +328,7 @@ struct ContentView: View {
         tab: BrowserTab
     ) async -> String? {
         let pane = tab.panes.first { $0.id == tab.focusedPaneID } ?? tab.panes[0]
-        let outcome = await FileTransferService.transfer(
+        let outcome = await FileTransferService.trackedTransfer(
             items,
             into: destination,
             operation: operation

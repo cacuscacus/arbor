@@ -11,6 +11,21 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-11-25
+
+### Added
+
+- **Type-to-select (type-ahead) in List & Icon views (`TypeAheadMatcher`)**: type characters directly in any focused browser pane to jump to matching items case- and diacritic-insensitively, cycle matches on repeated single-key presses (Finder-style), and automatically scroll matched rows/icons into view without stealing input from search, inline rename, or the embedded terminal
+- **Inline New Folder & New File creation (`UniqueItemNameResolver`)**: `⌘⇧N` and context-menu New Folder / New Empty File now create collision-safe items immediately (on both local and SSH locations), scroll them into view, and enter inline rename right away with stem-only selection for files — no modal alert
+- **Floating Transfer Progress HUD with Cancel (`TransferProgressStore`, `TransferProgressOverlay`)**: slow local copies and SFTP jobs display a macOS glass progress card in the bottom-right corner (delayed 350 ms so instant moves never flicker) with an explicit **Cancel** button, preserving instant APFS copy-on-write cloning on same-volume copies while streaming cross-volume large file copies in 1 MB chunks with live byte progress and partial-file cleanup on cancellation
+- **Async recursive folder size in `Get Info` (`FolderSizeCalculator`)**: `FileDetailsView` and `MultiSelectionInfoView` calculate folder and `.app` bundle sizes asynchronously on background workers with hardlink deduplication, symlink-loop safety, live ticking progress, exact-byte tooltips, and automatic cancellation when dismissed
+- **Right-click List view column headers**: right-clicking any List view column header opens a native Finder-style menu to toggle `Kind`, `Size`, `Date Modified`, `Date Created`, `Relative Path`, and `Full Path` in sync with `View → Columns`
+- **Pure unit tests (`FinderParityTests`)**: 5 new tests covering type-ahead prefix/diacritic/cycling, case-insensitive unique naming, hardlink-deduplicated/symlink-safe folder size calculation, and transfer progress formatting (105 Swift tests total)
+
+### Fixed
+
+- **Icon view Delete shortcut**: bare `Delete` in Icon view no longer triggers Trash without `⌘`, matching `⌘⌫` in List view and macOS Finder
+
 ## [1.11.0] — 2026-11-25
 
 ### Added
