@@ -1,0 +1,146 @@
+[
+  {
+    "query": "factura luz",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["electric", "electricity", "energia", "edenor", "edesur", "invoice", "bill", "recibo", "servicio", "utility", "power"]
+  },
+  {
+    "query": "resumen tarjeta",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["visa", "mastercard", "amex", "card", "credit", "credito", "statement", "banco", "bank", "extracto", "estado_cuenta"]
+  },
+  {
+    "query": "contrato alquiler",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["lease", "rent", "rental", "locacion", "inmueble", "propiedad", "departamento", "agreement", "housing", "tenant"]
+  },
+  {
+    "query": "comprobante transferencia",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["receipt", "payment", "pago", "wire", "bank", "banco", "cbu", "alias", "voucher", "transfer", "transaccion"]
+  },
+  {
+    "query": "recibo sueldo",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["payslip", "payroll", "salary", "salario", "haberes", "liquidacion", "nomina", "paystub", "wage", "empleo"]
+  },
+  {
+    "query": "estudios medicos",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["lab", "laboratorio", "analisis", "sangre", "blood", "medical", "health", "clinica", "radiografia", "ecografia", "doctor", "report", "salud"]
+  },
+  {
+    "query": "impuesto ganancias",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["tax", "afip", "arca", "ddjj", "declaracion", "income", "tributario", "fiscal", "retencion", "siradig"]
+  },
+  {
+    "query": "boleto avion",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["flight", "boarding", "pasaje", "vuelo", "airline", "aerolinea", "itinerary", "itinerario", "ticket", "reserva", "eticket"]
+  },
+  {
+    "query": "poliza seguro auto",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["insurance", "policy", "vehiculo", "car", "cobertura", "siniestro", "automotor", "patente", "seguros"]
+  },
+  {
+    "query": "pasaporte",
+    "mode": "name",
+    "category": "es_personal",
+    "expected_any": ["passport", "dni", "identidad", "id", "visa", "viaje", "travel", "documento", "ciudadania"]
+  },
+  {
+    "query": "tax return",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["irs", "1040", "w2", "1099", "taxes", "filing", "fiscal", "impuesto", "deduction", "refund", "accountant"]
+  },
+  {
+    "query": "electricity bill",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["power", "utility", "energy", "invoice", "receipt", "electric", "factura", "luz", "statement"]
+  },
+  {
+    "query": "bank statement",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["account", "checking", "savings", "transaction", "balance", "bank", "extracto", "resumen", "ledger", "wire"]
+  },
+  {
+    "query": "resume cv",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["curriculum", "vitae", "profile", "portfolio", "bio", "career", "experience", "job", "application", "cover_letter"]
+  },
+  {
+    "query": "meeting notes",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["minutes", "agenda", "standup", "sync", "recap", "summary", "call", "transcript", "acta", "reunion", "1on1"]
+  },
+  {
+    "query": "flight ticket",
+    "mode": "name",
+    "category": "en_personal",
+    "expected_any": ["boarding", "pass", "itinerary", "airline", "reservation", "booking", "eticket", "vuelo", "pasaje", "pnr"]
+  },
+  {
+    "query": "login timeout",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["auth", "session", "expired", "expiry", "token", "ttl", "signin", "oauth", "jwt", "credential", "logout"]
+  },
+  {
+    "query": "database migration",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["schema", "alter", "sql", "migrate", "prisma", "alembic", "flyway", "rollback", "table", "postgres", "sqlite", "seed"]
+  },
+  {
+    "query": "rate limit",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["throttle", "quota", "429", "backoff", "bucket", "limiter", "burst", "cooldown", "retry", "ratelimit"]
+  },
+  {
+    "query": "ssh config",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["identityfile", "known_hosts", "authorized_keys", "openssh", "keychain", "pem", "ed25519", "rsa", "bastion", "proxyjump", "sftp"]
+  },
+  {
+    "query": "dark mode",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["theme", "colorscheme", "appearance", "palette", "night", "dark", "light", "css", "prefers-color-scheme", "tint"]
+  },
+  {
+    "query": "memory leak",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["retain", "cycle", "weak", "alloc", "heap", "gc", "deinit", "dispose", "leak", "oom", "profiler", "unowned"]
+  },
+  {
+    "query": "payment webhook",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["stripe", "checkout", "billing", "invoice", "signature", "callback", "event", "subscription", "charge", "mercadopago"]
+  },
+  {
+    "query": "retry backoff",
+    "mode": "content",
+    "category": "dev_code",
+    "expected_any": ["exponential", "jitter", "attempt", "max_retries", "delay", "timeout", "reconnect", "circuit", "fallback", "resilience"]
+  }
+]

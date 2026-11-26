@@ -22,12 +22,18 @@ private struct SearchSettingsView: View {
     @Bindable private var prefs = SearchPreferencesStore.shared
     @State private var excludedNamesText = ""
     @State private var excludedGlobalPathsText = ""
+    @State private var testQuery = "factura luz"
+    @State private var testTerms: [String] = []
+    @State private var testElapsedMs: Double?
+    @State private var testError: String?
+    @State private var isTestingExpansion = false
 
     var body: some View {
         Form {
             limitsSection
             progressiveSection
             contentSearchSection
+            smartExpansionSection
             exclusionsSection
             resetSection
         }
@@ -100,6 +106,118 @@ private struct SearchSettingsView: View {
 
             Toggle("Always use deep ripgrep scan for Global Content", isOn: $prefs.deepGlobalContentScan)
                 .help("Default uses Spotlight's instant text index for Global Content; turn this on to scan disk with ripgrep by default.")
+        }
+    }
+
+    @ViewBuilder
+    private var smartExpansionSection: some View {
+        Section("Smart Expansion (Local MLX · Opt-in)") {
+            Toggle("Expand search queries with a local MLX model", isOn: $prefs.smartExpansionEnabled)
+                .help("Off by default. Runs offline in an isolated helper process to suggest synonyms and cross-language terms (e.g. 'factura luz' -> electricity, invoice, bill). Literal matches always appear first.")
+
+            Picker("Model preset", selection: $prefs.smartExpansionModelPreset) {
+                ForEach(SearchExpansionModelPreset.allCases) { preset in
+                    Text(preset.displayName).tag(preset)
+                }
+            }
+
+            if prefs.smartExpansionModelPreset == .custom {
+                TextField(
+                    "Custom model ID or local path",
+                    text: $prefs.smartExpansionCustomModelID,
+                    prompt: Text("mlx-community/Qwen3.5-2B-8bit")
+                )
+            }
+
+            Picker("Unload weights when idle", selection: $prefs.smartExpansionIdleUnloadMinutes) {
+                ForEach(SearchExpansionModelPreset.idleUnloadPresetsMinutes, id: \.self) { mins in
+                    Text(mins == 0 ? "Keep loaded" : "After \(mins) minutes").tag(mins)
+                }
+            }
+
+            LabeledContent("MLX runtime") {
+                if let python = MLXExpansionService.detectPythonPath(override: prefs.smartExpansionPythonPath) {
+                    Text(python)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("Not found — install with `brew install mlx-lm`")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            TextField(
+                "Python override (optional)",
+                text: $prefs.smartExpansionPythonPath,
+                prompt: Text("Auto-detected from Homebrew mlx-lm")
+            )
+
+            HStack(spacing: 8) {
+                TextField("Test query", text: $testQuery)
+                    .textFieldStyle(.roundedBorder)
+                Button(isTestingExpansion ? "Running…" : "Test Expansion") {
+                    runExpansionTest()
+                }
+                .disabled(isTestingExpansion || testQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Unload Model") {
+                    Task { await MLXExpansionService.shared.unload() }
+                }
+            }
+
+            if let testError {
+                Text(testError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if !testTerms.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(testTerms, id: \.self) { term in
+                        Text(term)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.14), in: Capsule())
+                    }
+                    if let ms = testElapsedMs {
+                        Spacer()
+                        Text(ms == 0 ? "cached" : "\(Int(ms.rounded())) ms")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func runExpansionTest() {
+        let query = testQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        let modelID = prefs.resolvedSmartExpansionModelID
+        let pythonOverride = prefs.smartExpansionPythonPath
+        let idleMinutes = prefs.smartExpansionIdleUnloadMinutes
+
+        isTestingExpansion = true
+        testError = nil
+        Task {
+            do {
+                let res = try await MLXExpansionService.shared.expand(
+                    query: query,
+                    mode: .name,
+                    modelID: modelID,
+                    pythonPathOverride: pythonOverride,
+                    idleUnloadMinutes: idleMinutes
+                )
+                testTerms = res.terms
+                testElapsedMs = res.fromCache ? 0 : res.elapsedMs
+            } catch {
+                testError = error.localizedDescription
+                testTerms = []
+                testElapsedMs = nil
+            }
+            isTestingExpansion = false
         }
     }
 

@@ -31,8 +31,20 @@ final class SearchSession {
     var timeoutOverride: Double?
     var deepGlobalContentOverride: Bool?
 
+    // MARK: - Opt-in Smart Expansion (Local MLX)
+
+    private(set) var expandedTerms: [String] = []
+    private(set) var dismissedExpandedTerms: Set<String> = []
+    private(set) var isExpandingTerms = false
+    private(set) var expansionElapsedMs: Double?
+    private(set) var expansionError: String?
+    /// Per-session override: `nil` follows Settings (`smartExpansionEnabled`), `true`/`false` overrides for this tab.
+    var smartExpansionOverride: Bool?
+
+    @ObservationIgnored private var expandedKey: String?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var elapsedTask: Task<Void, Never>?
+    @ObservationIgnored private var expansionTask: Task<Void, Never>?
 
     var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,6 +56,15 @@ final class SearchSession {
 
     var showsPanel: Bool {
         isPresented || isActive
+    }
+
+    var isSmartExpansionActive: Bool {
+        smartExpansionOverride ?? SearchPreferencesStore.shared.smartExpansionEnabled
+    }
+
+    var activeExpandedTerms: [String] {
+        guard isSmartExpansionActive else { return [] }
+        return expandedTerms.filter { !dismissedExpandedTerms.contains($0) }
     }
 
     var activeLimit: Int {
@@ -82,6 +103,12 @@ final class SearchSession {
         limitOverride = source.limitOverride
         timeoutOverride = source.timeoutOverride
         deepGlobalContentOverride = source.deepGlobalContentOverride
+        expandedTerms = source.expandedTerms
+        dismissedExpandedTerms = source.dismissedExpandedTerms
+        expansionElapsedMs = source.expansionElapsedMs
+        expansionError = source.expansionError
+        smartExpansionOverride = source.smartExpansionOverride
+        expandedKey = source.expandedKey
         focusRequestToken &+= 1
     }
 
@@ -90,11 +117,16 @@ final class SearchSession {
         seedEntries: [FileEntry],
         showHiddenFiles: Bool,
         immediate: Bool = false,
+        skipExpansionLaunch: Bool = false,
         onComplete: @escaping (Set<ItemRef>) -> Void,
         onCleared: @escaping () -> Void
     ) {
         searchTask?.cancel()
         elapsedTask?.cancel()
+        if !skipExpansionLaunch {
+            expansionTask?.cancel()
+            isExpandingTerms = false
+        }
 
         let trimmed = trimmedQuery
         guard !trimmed.isEmpty else {
@@ -104,6 +136,7 @@ final class SearchSession {
             stopReason = nil
             elapsedSeconds = 0
             errorMessage = nil
+            resetExpansionState()
             onCleared()
             return
         }
@@ -116,11 +149,24 @@ final class SearchSession {
 
         let currentScope = scope
         let currentMode = mode
-        let options = SearchPreferencesStore.shared.makeOptions(
+        let prefs = SearchPreferencesStore.shared
+        let modelID = prefs.resolvedSmartExpansionModelID
+        let currentKey = "\(modelID)|\(currentMode.rawValue)|\(SearchExpansionPostProcessor.normalize(trimmed))"
+        if expandedKey != currentKey {
+            expandedTerms = []
+            dismissedExpandedTerms = []
+            expansionElapsedMs = nil
+            expansionError = nil
+            expandedKey = nil
+        }
+
+        let activeTerms = activeExpandedTerms
+        let options = prefs.makeOptions(
             showHiddenFiles: showHiddenFiles,
             resultLimitOverride: limitOverride,
             timeoutOverride: timeoutOverride,
-            deepGlobalContentOverride: deepGlobalContentOverride
+            deepGlobalContentOverride: deepGlobalContentOverride,
+            expandedTerms: activeTerms
         )
         let debounceMs: Int = {
             if immediate { return 0 }
@@ -194,10 +240,82 @@ final class SearchSession {
                 onComplete([])
             }
         }
+
+        // Launch asynchronous local MLX term expansion after a typing pause — never blocks literal search.
+        let shouldExpand = !skipExpansionLaunch
+            && isSmartExpansionActive
+            && expandedKey != currentKey
+            && trimmed.count >= 3
+            && !FilenameSearchPattern(trimmed).isGlob
+        if shouldExpand {
+            let pythonOverride = prefs.smartExpansionPythonPath
+            let idleMinutes = prefs.smartExpansionIdleUnloadMinutes
+            let expansionDelayMs = immediate ? 0 : 420
+
+            isExpandingTerms = true
+            expansionError = nil
+            expansionTask = Task { [weak self] in
+                if expansionDelayMs > 0 {
+                    try? await Task.sleep(for: .milliseconds(expansionDelayMs))
+                    guard !Task.isCancelled else { return }
+                }
+                do {
+                    let result = try await MLXExpansionService.shared.expand(
+                        query: trimmed,
+                        mode: currentMode,
+                        modelID: modelID,
+                        pythonPathOverride: pythonOverride,
+                        idleUnloadMinutes: idleMinutes
+                    )
+                    guard !Task.isCancelled, let self else { return }
+                    guard self.trimmedQuery == trimmed, self.mode == currentMode else { return }
+                    self.isExpandingTerms = false
+                    self.expandedKey = currentKey
+                    self.expandedTerms = result.terms
+                    self.expansionElapsedMs = result.elapsedMs
+                    self.expansionError = nil
+
+                    if !result.terms.isEmpty {
+                        self.schedule(
+                            folder: folder,
+                            seedEntries: seedEntries,
+                            showHiddenFiles: showHiddenFiles,
+                            immediate: true,
+                            skipExpansionLaunch: true,
+                            onComplete: onComplete,
+                            onCleared: onCleared
+                        )
+                    }
+                } catch is CancellationError {
+                    await MainActor.run { [weak self] in
+                        self?.isExpandingTerms = false
+                    }
+                } catch {
+                    guard !Task.isCancelled, let self else { return }
+                    self.isExpandingTerms = false
+                    self.expansionError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func dismissExpandedTerm(_ term: String) {
+        dismissedExpandedTerms.insert(term)
+    }
+
+    func toggleSmartExpansionForSession() {
+        let next = !isSmartExpansionActive
+        smartExpansionOverride = next
+        if !next {
+            expansionTask?.cancel()
+            isExpandingTerms = false
+        }
     }
 
     /// Stops an in-flight search while keeping all partial results visible.
     func stop() {
+        expansionTask?.cancel()
+        isExpandingTerms = false
         guard isSearching else { return }
         searchTask?.cancel()
         elapsedTask?.cancel()
@@ -209,15 +327,29 @@ final class SearchSession {
     func cancel() {
         searchTask?.cancel()
         elapsedTask?.cancel()
+        expansionTask?.cancel()
         searchTask = nil
         elapsedTask = nil
+        expansionTask = nil
         isSearching = false
+        isExpandingTerms = false
     }
 
     func resetOverrides() {
         limitOverride = nil
         timeoutOverride = nil
         deepGlobalContentOverride = nil
+    }
+
+    func resetExpansionState() {
+        expansionTask?.cancel()
+        expansionTask = nil
+        isExpandingTerms = false
+        expandedTerms = []
+        dismissedExpandedTerms = []
+        expansionElapsedMs = nil
+        expansionError = nil
+        expandedKey = nil
     }
 
     func clear() {
@@ -230,6 +362,8 @@ final class SearchSession {
         limitOverride = nil
         timeoutOverride = nil
         deepGlobalContentOverride = nil
+        smartExpansionOverride = nil
+        resetExpansionState()
         errorMessage = nil
     }
 }

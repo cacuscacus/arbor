@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-11-25
+
+### Added
+
+- **Opt-in Local MLX Smart Search Expansion (`SearchQueryExpander`, `MLXExpansionService`, `arbor_mlx_helper.py`)**: strictly **OFF by default**, runs offline in an isolated child process using Apple Silicon `mlx-lm` to bridge vocabulary mismatches in both Name and Content search (e.g. `"factura luz"` → `electricity`, `bill`, `utility`, `invoice`, `meter`; `"rate limit"` → `throttling`, `quota`, `burst`)
+- **Interactive Search Chips & Sparkle Toggle (`SearchBarView`, `SearchSession`, `ContentSearchResultsView`)**: literal search always runs immediately with zero delay; when Smart Expansion is enabled (in Settings or via the search bar's sparkle toggle), related terms stream in as removable pill chips (`×`) and run in a single fast `rg -e` / `mdfind ||` / `fd` pass in `SearchRing.expanded` — always sorted strictly *below* direct literal hits and clearly badged (`✨ Related`)
+- **Settings → Search → Smart Expansion (Local MLX · Opt-in)**: benchmark-backed model presets (`0.8B 4-bit`, `2B 4-bit`, **`2B 8-bit` Recommended**, `4B 4-bit`, `9B 4-bit`, or Custom HF ID/local path), auto-detected Homebrew `mlx-lm` runtime with override, idle auto-unload TTL (`2 / 5 / 10 min`), **Unload Model** button, and live **Test Expansion** widget
+- **Reproducible MLX Benchmark (`scripts/bench-mlx-expansion.py`, `scripts/bench-mlx-queries.json`)**: 24 bilingual ES/EN/dev queries measuring latency, peak Metal RAM, strict JSON compliance, hit rate, and noise rate — confirming `Qwen3.5-2B-8bit` as the sweet spot (100% hit rate, 231 ms median, 2.39 GB Metal)
+- **Pure unit test suite (`SearchQueryExpanderTests`)**: 6 new tests covering JSON/`<think>`/fence extraction, stopword/echo/accent deduplication, LRU caching, `.expanded` ring ordering strictly below `.global`, and opt-in preference defaults
+
 ## [1.9.0] — 2026-11-25
 
 ### Added

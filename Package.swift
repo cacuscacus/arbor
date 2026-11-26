@@ -26,6 +26,7 @@ let package = Package(
                 "DragAutoScrollController.swift",
                 "SearchEngine.swift",
                 "ContentSearchEngine.swift",
+                "SearchQueryExpander.swift",
                 "SearchPreferencesStore.swift",
             ]
         ),

@@ -138,9 +138,11 @@ private struct LocalFileBrowserView: View {
     private func refreshVisibleEntries() {
         if isSearchActive {
             // Entries are already materialized off-main-thread by SearchService.
-            // Keep concentric rings ordered (This Folder → Subfolders → Home) when
-            // progressive scoping is on so outer Global hits never jump above closer ones.
-            if search.scope == .global, SearchPreferencesStore.shared.progressiveScoping {
+            // Keep concentric rings ordered (This Folder → Subfolders → Home → Related)
+            // when progressive scoping or Smart Expansion is active so outer hits never
+            // jump above closer literal matches.
+            let hasExpanded = (search.countsByRing[.expanded] ?? 0) > 0
+            if (search.scope == .global && SearchPreferencesStore.shared.progressiveScoping) || hasExpanded {
                 var grouped: [FileEntry] = []
                 grouped.reserveCapacity(search.hits.count)
                 for ring in SearchRing.allCases {
@@ -507,6 +509,20 @@ private struct LocalFileBrowserView: View {
             activeLimit: search.activeLimit,
             stopReason: search.stopReason,
             focus: $searchFocused,
+            smartExpansionActive: search.isSmartExpansionActive,
+            isExpandingTerms: search.isExpandingTerms,
+            expandedTerms: search.activeExpandedTerms,
+            expansionError: search.expansionError,
+            onToggleSmartExpansion: {
+                search.toggleSmartExpansionForSession()
+                if isSearchActive {
+                    scheduleSearch(immediate: true)
+                }
+            },
+            onDismissExpandedTerm: { term in
+                search.dismissExpandedTerm(term)
+                scheduleSearch(immediate: true, skipExpansionLaunch: true)
+            },
             onStop: stopSearch,
             onOpenInTab: (!isDedicatedSearchTab && onOpenSearchInTab != nil)
                 ? { onOpenSearchInTab?(pane) }
@@ -756,6 +772,7 @@ private struct LocalFileBrowserView: View {
             ContentSearchResultsView(
                 hits: search.hits,
                 selection: $selection,
+                extraTopPadding: (!search.activeExpandedTerms.isEmpty || search.isExpandingTerms) ? 26 : 0,
                 onOpen: { entry in
                     cancelRename()
                     openDoubleClicked(entry)
@@ -1165,12 +1182,13 @@ private struct LocalFileBrowserView: View {
 
     // MARK: - Search / navigation
 
-    private func scheduleSearch(immediate: Bool = false) {
+    private func scheduleSearch(immediate: Bool = false, skipExpansionLaunch: Bool = false) {
         search.schedule(
             folder: localPath,
             seedEntries: entries,
             showHiddenFiles: showHiddenFiles,
             immediate: immediate,
+            skipExpansionLaunch: skipExpansionLaunch,
             onComplete: { validIDs in
                 pruneSelection(to: validIDs)
                 if isActive, search.isPresented {

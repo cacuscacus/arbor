@@ -82,6 +82,42 @@ final class SearchPreferencesStore {
         didSet { defaults.set(excludedGlobalRelativePaths, forKey: Keys.excludedGlobalRelativePaths) }
     }
 
+    // MARK: - Opt-in Local MLX Smart Expansion (OFF by default)
+
+    var smartExpansionEnabled: Bool {
+        didSet { defaults.set(smartExpansionEnabled, forKey: Keys.smartExpansionEnabled) }
+    }
+
+    var smartExpansionModelPreset: SearchExpansionModelPreset {
+        didSet { defaults.set(smartExpansionModelPreset.rawValue, forKey: Keys.smartExpansionModelPreset) }
+    }
+
+    var smartExpansionCustomModelID: String {
+        didSet { defaults.set(smartExpansionCustomModelID, forKey: Keys.smartExpansionCustomModelID) }
+    }
+
+    /// Minutes of inactivity before the isolated MLX helper unloads weights (`0` = keep loaded).
+    var smartExpansionIdleUnloadMinutes: Int {
+        didSet {
+            let clamped = max(0, smartExpansionIdleUnloadMinutes)
+            if clamped != smartExpansionIdleUnloadMinutes { smartExpansionIdleUnloadMinutes = clamped; return }
+            defaults.set(smartExpansionIdleUnloadMinutes, forKey: Keys.smartExpansionIdleUnloadMinutes)
+        }
+    }
+
+    /// Optional explicit path to a Python binary with `mlx_lm` installed (empty = auto-detect).
+    var smartExpansionPythonPath: String {
+        didSet { defaults.set(smartExpansionPythonPath, forKey: Keys.smartExpansionPythonPath) }
+    }
+
+    var resolvedSmartExpansionModelID: String {
+        if smartExpansionModelPreset == .custom {
+            let custom = smartExpansionCustomModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+            return custom.isEmpty ? SearchExpansionModelPreset.balanced2B8Bit.rawValue : custom
+        }
+        return smartExpansionModelPreset.rawValue
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -101,13 +137,25 @@ final class SearchPreferencesStore {
         excludedNames = defaults.stringArray(forKey: Keys.excludedNames) ?? SearchOptions.defaultExcludedNames
         excludedGlobalRelativePaths = defaults.stringArray(forKey: Keys.excludedGlobalRelativePaths)
             ?? SearchOptions.defaultExcludedGlobalRelativePaths
+        smartExpansionEnabled = defaults.object(forKey: Keys.smartExpansionEnabled) as? Bool ?? false
+        if let rawPreset = defaults.string(forKey: Keys.smartExpansionModelPreset),
+           let parsed = SearchExpansionModelPreset(rawValue: rawPreset)
+        {
+            smartExpansionModelPreset = parsed
+        } else {
+            smartExpansionModelPreset = .balanced2B8Bit
+        }
+        smartExpansionCustomModelID = defaults.string(forKey: Keys.smartExpansionCustomModelID) ?? ""
+        smartExpansionIdleUnloadMinutes = defaults.object(forKey: Keys.smartExpansionIdleUnloadMinutes) as? Int ?? 5
+        smartExpansionPythonPath = defaults.string(forKey: Keys.smartExpansionPythonPath) ?? ""
     }
 
     func makeOptions(
         showHiddenFiles: Bool,
         resultLimitOverride: Int? = nil,
         timeoutOverride: Double? = nil,
-        deepGlobalContentOverride: Bool? = nil
+        deepGlobalContentOverride: Bool? = nil,
+        expandedTerms: [String] = []
     ) -> SearchOptions {
         SearchOptions(
             resultLimit: resultLimitOverride ?? resultLimit,
@@ -121,7 +169,8 @@ final class SearchPreferencesStore {
             maxContentFileSizeMB: maxContentFileSizeMB,
             respectGitignoreInContent: respectGitignoreInContent,
             maxMatchesPerFile: maxMatchesPerFile,
-            deepGlobalContentScan: deepGlobalContentOverride ?? deepGlobalContentScan
+            deepGlobalContentScan: deepGlobalContentOverride ?? deepGlobalContentScan,
+            expandedTerms: expandedTerms
         )
     }
 
@@ -138,6 +187,11 @@ final class SearchPreferencesStore {
         deepGlobalContentScan = false
         excludedNames = SearchOptions.defaultExcludedNames
         excludedGlobalRelativePaths = SearchOptions.defaultExcludedGlobalRelativePaths
+        smartExpansionEnabled = false
+        smartExpansionModelPreset = .balanced2B8Bit
+        smartExpansionCustomModelID = ""
+        smartExpansionIdleUnloadMinutes = 5
+        smartExpansionPythonPath = ""
     }
 
     static func parseCSVList(_ text: String) -> [String] {
@@ -164,5 +218,10 @@ final class SearchPreferencesStore {
         static let deepGlobalContentScan = "arbor.search.deepGlobalContentScan"
         static let excludedNames = "arbor.search.excludedNames"
         static let excludedGlobalRelativePaths = "arbor.search.excludedGlobalRelativePaths"
+        static let smartExpansionEnabled = "arbor.search.smartExpansionEnabled"
+        static let smartExpansionModelPreset = "arbor.search.smartExpansionModelPreset"
+        static let smartExpansionCustomModelID = "arbor.search.smartExpansionCustomModelID"
+        static let smartExpansionIdleUnloadMinutes = "arbor.search.smartExpansionIdleUnloadMinutes"
+        static let smartExpansionPythonPath = "arbor.search.smartExpansionPythonPath"
     }
 }

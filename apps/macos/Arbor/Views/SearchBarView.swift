@@ -9,106 +9,198 @@ struct SearchBarView: View {
     var activeLimit: Int = SearchOptions.defaultResultLimit
     var stopReason: SearchStopReason? = nil
     var focus: FocusState<Bool>.Binding
+    var smartExpansionActive: Bool = false
+    var isExpandingTerms: Bool = false
+    var expandedTerms: [String] = []
+    var expansionError: String? = nil
+    var onToggleSmartExpansion: (() -> Void)? = nil
+    var onDismissExpandedTerm: ((String) -> Void)? = nil
     var onStop: (() -> Void)? = nil
     var onOpenInTab: (() -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 5) {
-                Image(systemName: mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
 
-                TextField(placeholder, text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .frame(minWidth: 150, idealWidth: 210, maxWidth: 270)
-                    .focused(focus)
+                    TextField(placeholder, text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .frame(minWidth: 150, idealWidth: 210, maxWidth: 270)
+                        .focused(focus)
 
-                // Keep a stable trailing slot so ProgressView ↔ clear-button
-                // swaps don't recreate the TextField and drop keyboard focus.
-                ZStack {
-                    if isSearching {
-                        if let onStop {
-                            Button(action: onStop) {
+                    // Keep a stable trailing slot so ProgressView ↔ clear-button
+                    // swaps don't recreate the TextField and drop keyboard focus.
+                    ZStack {
+                        if isSearching {
+                            if let onStop {
+                                Button(action: onStop) {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Stop search")
+                            } else {
                                 ProgressView()
                                     .controlSize(.mini)
                             }
+                        } else if !query.isEmpty {
+                            Button {
+                                query = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
                             .buttonStyle(.plain)
-                            .help("Stop search")
-                        } else {
-                            ProgressView()
-                                .controlSize(.mini)
+                            .help("Clear search")
                         }
-                    } else if !query.isEmpty {
-                        Button {
-                            query = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Clear search")
                     }
+                    .frame(width: 14, height: 14)
                 }
-                .frame(width: 14, height: 14)
-            }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
 
-            Picker("Mode", selection: $mode) {
-                Text("Name").tag(SearchMode.name)
-                Text("Content").tag(SearchMode.content)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 132)
-            .help("Search filenames or file contents")
-
-            Picker("Scope", selection: $scope) {
-                Text("Folder").tag(SearchScope.currentFolder)
-                Text("Global").tag(SearchScope.global)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 132)
-            .help("Search scope")
-
-            Text(resultCount.map(resultLabel) ?? " ")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(minWidth: 36, alignment: .trailing)
-                .opacity(resultCount != nil && !query.isEmpty ? 1 : 0)
-                .accessibilityHidden(resultCount == nil || query.isEmpty)
-
-            if let onOpenInTab, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button(action: onOpenInTab) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
+                Picker("Mode", selection: $mode) {
+                    Text("Name").tag(SearchMode.name)
+                    Text("Content").tag(SearchMode.content)
                 }
-                .buttonStyle(.plain)
-                .help("Open search in a new tab")
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 132)
+                .help("Search filenames or file contents")
+
+                Picker("Scope", selection: $scope) {
+                    Text("Folder").tag(SearchScope.currentFolder)
+                    Text("Global").tag(SearchScope.global)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 132)
+                .help("Search scope")
+
+                if let onToggleSmartExpansion {
+                    Button(action: onToggleSmartExpansion) {
+                        Image(systemName: smartExpansionActive ? "sparkles" : "sparkles")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(smartExpansionActive ? Color.accentColor : Color.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(
+                                smartExpansionActive
+                                    ? Color.accentColor.opacity(0.16)
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(
+                        smartExpansionActive
+                            ? "Smart Expansion (Local MLX) active — click to pause for this tab"
+                            : "Expand query with local MLX model (opt-in)"
+                    )
+                }
+
+                Text(resultCount.map(resultLabel) ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(minWidth: 36, alignment: .trailing)
+                    .opacity(resultCount != nil && !query.isEmpty ? 1 : 0)
+                    .accessibilityHidden(resultCount == nil || query.isEmpty)
+
+                if let onOpenInTab, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(action: onOpenInTab) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open search in a new tab")
+                }
+
+                if let onDismiss {
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close search")
+                }
             }
 
-            if let onDismiss {
-                Button {
-                    onDismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close search")
+            if showsExpansionBar {
+                expansionBar
             }
         }
         .padding(.leading, 4)
         .padding(.trailing, 2)
+    }
+
+    private var showsExpansionBar: Bool {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return isExpandingTerms || !expandedTerms.isEmpty || (smartExpansionActive && expansionError != nil)
+    }
+
+    private var expansionBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            if isExpandingTerms {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Expanding locally via MLX…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if let expansionError, expandedTerms.isEmpty {
+                Text(expansionError)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            } else {
+                Text("Related:")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                ForEach(expandedTerms, id: \.self) { term in
+                    HStack(spacing: 3) {
+                        Text(term)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.primary)
+                        if let onDismissExpandedTerm {
+                            Button {
+                                onDismissExpandedTerm(term)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove '\(term)' from expanded search")
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.14), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color.accentColor.opacity(0.28), lineWidth: 0.75)
+                    }
+                }
+            }
+        }
+        .padding(.leading, 4)
+        .padding(.bottom, 1)
     }
 
     private var placeholder: String {
@@ -233,6 +325,9 @@ struct SearchStatusBanner: View {
 
     private var finishedLabel: String {
         let elapsed = String(format: "%.1fs", elapsedSeconds)
+        let expandedCount = countsByRing[.expanded] ?? 0
+        let expandedSuffix = expandedCount > 0 ? " · +\(Self.formatCount(expandedCount)) related" : ""
+
         switch stopReason {
         case .limitReached(let limit):
             return "Showing first \(Self.formatCount(limit)) \(unitPlural) (limit reached · \(elapsed))"
@@ -247,8 +342,12 @@ struct SearchStatusBanner: View {
                 let localCount = (countsByRing[.currentFolderDirect] ?? 0) + (countsByRing[.currentFolderSubtree] ?? 0)
                 let globalCount = countsByRing[.global] ?? 0
                 if localCount > 0, globalCount > 0 {
-                    return "\(Self.formatCount(localCount)) in \(folderName) · \(Self.formatCount(globalCount)) in Home (\(backend.rawValue) · \(elapsed))"
+                    return "\(Self.formatCount(localCount)) in \(folderName) · \(Self.formatCount(globalCount)) in Home\(expandedSuffix) (\(backend.rawValue) · \(elapsed))"
                 }
+            }
+            let directCount = hitCount - expandedCount
+            if expandedCount > 0 {
+                return "\(Self.formatCount(directCount)) direct\(expandedSuffix) in \(scopeLabel) (\(backend.rawValue) · \(elapsed))"
             }
             return "\(Self.formatCount(hitCount)) \(hitCount == 1 ? unitSingular : unitPlural) in \(scopeLabel) (\(backend.rawValue) · \(elapsed))"
         }

@@ -6,6 +6,7 @@ import SwiftUI
 struct ContentSearchResultsView<MenuContent: View>: View {
     let hits: [SearchHit]
     @Binding var selection: Set<ItemRef>
+    var extraTopPadding: CGFloat = 0
     var onOpen: (FileEntry) -> Void
     @ViewBuilder var contextMenu: (FileEntry) -> MenuContent
 
@@ -34,7 +35,7 @@ struct ContentSearchResultsView<MenuContent: View>: View {
                 }
             }
             // Clear the floating search panel at top-trailing while letting content scroll smoothly beneath it.
-            .padding(.top, 56)
+            .padding(.top, 56 + extraTopPadding)
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
         }
@@ -87,6 +88,15 @@ private struct ContentSearchHitRow: View {
                 }
 
                 Spacer(minLength: 8)
+
+                if hit.ring == .expanded {
+                    Label("Related", systemImage: "sparkles")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.14), in: Capsule())
+                }
 
                 Text(badgeText)
                     .font(.caption2.monospacedDigit())

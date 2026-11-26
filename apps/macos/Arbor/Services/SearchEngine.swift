@@ -6,6 +6,8 @@ nonisolated enum SearchRing: Int, Comparable, CaseIterable, Hashable, Sendable {
     case currentFolderDirect = 0
     case currentFolderSubtree = 1
     case global = 2
+    /// Related hits found via opt-in local MLX term expansion (always below direct hits).
+    case expanded = 3
 
     static func < (lhs: SearchRing, rhs: SearchRing) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -16,6 +18,7 @@ nonisolated enum SearchRing: Int, Comparable, CaseIterable, Hashable, Sendable {
         case .currentFolderDirect: return "This Folder"
         case .currentFolderSubtree: return "Subfolders"
         case .global: return "Home"
+        case .expanded: return "Related"
         }
     }
 }
@@ -100,6 +103,8 @@ nonisolated struct SearchOptions: Equatable, Sendable {
     var maxMatchesPerFile: Int
     /// When `true`, Global content search runs bounded `rg` on disk instead of Spotlight.
     var deepGlobalContentScan: Bool
+    /// Active opt-in related search tokens produced by local MLX expansion (run in `.expanded` ring).
+    var expandedTerms: [String]
 
     var maxContentFileSizeBytes: UInt64? {
         maxContentFileSizeMB > 0 ? UInt64(maxContentFileSizeMB) * 1_024 * 1_024 : nil
@@ -117,7 +122,8 @@ nonisolated struct SearchOptions: Equatable, Sendable {
         maxContentFileSizeMB: Int = Self.defaultMaxContentFileSizeMB,
         respectGitignoreInContent: Bool = true,
         maxMatchesPerFile: Int = Self.defaultMaxMatchesPerFile,
-        deepGlobalContentScan: Bool = false
+        deepGlobalContentScan: Bool = false,
+        expandedTerms: [String] = []
     ) {
         self.resultLimit = max(1, resultLimit)
         self.timeoutSeconds = max(0.5, timeoutSeconds)
@@ -131,6 +137,7 @@ nonisolated struct SearchOptions: Equatable, Sendable {
         self.respectGitignoreInContent = respectGitignoreInContent
         self.maxMatchesPerFile = max(1, maxMatchesPerFile)
         self.deepGlobalContentScan = deepGlobalContentScan
+        self.expandedTerms = expandedTerms
     }
 
     /// Next larger result limit preset when the user clicks "Load more".

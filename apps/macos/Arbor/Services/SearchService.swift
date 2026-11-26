@@ -273,6 +273,18 @@ nonisolated enum SearchService {
                             )
                         }
 
+                        // Opt-in local MLX expanded terms run in the outer `.expanded` ring
+                        // strictly below literal matches.
+                        if !options.expandedTerms.isEmpty, !coordinator.isLimitReached, !Task.isCancelled {
+                            try await executeExpandedFilenameSearch(
+                                terms: options.expandedTerms,
+                                scope: scope,
+                                currentFolder: currentFolder.standardizedFileURL,
+                                options: options,
+                                coordinator: coordinator
+                            )
+                        }
+
                     case .content:
                         try await executeContentSearch(
                             query: trimmed,
@@ -281,6 +293,16 @@ nonisolated enum SearchService {
                             options: options,
                             coordinator: coordinator
                         )
+
+                        if !options.expandedTerms.isEmpty, !coordinator.isLimitReached, !Task.isCancelled {
+                            try await executeExpandedContentSearch(
+                                terms: options.expandedTerms,
+                                scope: scope,
+                                currentFolder: currentFolder.standardizedFileURL,
+                                options: options,
+                                coordinator: coordinator
+                            )
+                        }
                     }
 
                     guard !Task.isCancelled else {
@@ -708,6 +730,209 @@ nonisolated enum SearchService {
             throw CancellationError()
         case .completed:
             return outcome.terminationStatus == 0
+        }
+    }
+
+    // MARK: - Opt-in Expanded Term Search (Ring .expanded)
+
+    private static func executeExpandedFilenameSearch(
+        terms: [String],
+        scope: SearchScope,
+        currentFolder: URL,
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws {
+        let cleanTerms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !cleanTerms.isEmpty else { return }
+
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let root = (scope == .global) ? homeURL : currentFolder
+        let isGlobalRoot = (scope == .global)
+        let excludedNameSet = Set(options.excludedNames)
+
+        if isGlobalRoot {
+            // Single Spotlight OR predicate across all expanded terms.
+            let clauses = cleanTerms.map { "kMDItemFSName == '*\(escapeSpotlightLiteral($0))*'cd" }
+            let predicate = clauses.joined(separator: " || ")
+            _ = try? await StreamingProcessRunner.run(
+                executable: "/usr/bin/mdfind",
+                arguments: ["-0", "-onlyin", homeURL.path, predicate],
+                timeoutSeconds: min(6.0, options.timeoutSeconds),
+                preferNUL: true
+            ) { path in
+                emitPath(
+                    path,
+                    rootPath: homeURL.path,
+                    displayRootPath: homeURL.path,
+                    ring: .expanded,
+                    isGlobalRoot: true,
+                    options: options,
+                    excludedNameSet: excludedNameSet,
+                    coordinator: coordinator
+                )
+            }
+            return
+        }
+
+        if let fd = resolveFdPath() {
+            // Single `fd --regex` pass with escaped literal alternation.
+            let regex = cleanTerms.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+            let fdCap = min(10_000, max(options.resultLimit, 300))
+            var arguments = [
+                "--color=never",
+                "--ignore-case",
+                "--no-ignore",
+                "--print0",
+                "--max-results", "\(fdCap)",
+            ]
+            if let maxDepth = options.maxDepth {
+                arguments.append(contentsOf: ["--max-depth", "\(maxDepth + 1)"])
+            }
+            for excluded in options.excludedNames where !excluded.isEmpty {
+                arguments.append(contentsOf: ["--exclude", excluded])
+            }
+            if options.showHiddenFiles {
+                arguments.append("--hidden")
+            }
+            arguments.append(contentsOf: [regex, root.path])
+
+            _ = try? await StreamingProcessRunner.run(
+                executable: fd,
+                arguments: arguments,
+                timeoutSeconds: min(6.0, options.timeoutSeconds),
+                preferNUL: true
+            ) { path in
+                emitPath(
+                    path,
+                    rootPath: root.path,
+                    displayRootPath: root.path,
+                    ring: .expanded,
+                    isGlobalRoot: false,
+                    options: options,
+                    excludedNameSet: excludedNameSet,
+                    coordinator: coordinator
+                )
+            }
+        }
+    }
+
+    private static func executeExpandedContentSearch(
+        terms: [String],
+        scope: SearchScope,
+        currentFolder: URL,
+        options: SearchOptions,
+        coordinator: SearchStreamCoordinator
+    ) async throws {
+        let cleanTerms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !cleanTerms.isEmpty else { return }
+
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let isGlobalRoot = (scope == .global)
+        let root = isGlobalRoot ? homeURL : currentFolder
+        let excludedNameSet = Set(options.excludedNames)
+
+        if isGlobalRoot && !options.deepGlobalContentScan {
+            let clauses = cleanTerms.map { "kMDItemTextContent == '*\(escapeSpotlightLiteral($0))*'cd" }
+            let predicate = clauses.joined(separator: " || ")
+            _ = try? await StreamingProcessRunner.run(
+                executable: "/usr/bin/mdfind",
+                arguments: ["-0", "-onlyin", homeURL.path, predicate],
+                timeoutSeconds: min(6.0, options.timeoutSeconds),
+                preferNUL: true
+            ) { rawPath in
+                guard !rawPath.isEmpty else { return true }
+                if coordinator.isLimitReached { return false }
+                let path = rawPath.count > 1 && rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
+                guard !SearchPathFilter.isInsidePackage(path) else { return true }
+                guard !SearchPathFilter.isExcluded(
+                    path: path,
+                    rootPath: homeURL.path,
+                    isGlobalRoot: true,
+                    excludedNames: excludedNameSet,
+                    excludedGlobalRelativePaths: options.excludedGlobalRelativePaths,
+                    showHiddenFiles: options.showHiddenFiles
+                ) else {
+                    return true
+                }
+                var snippets: [ContentMatchSnippet] = []
+                for term in cleanTerms where snippets.isEmpty {
+                    snippets = ContentFileScanner.scanFile(
+                        at: path,
+                        query: term,
+                        maxFileSizeBytes: spotlightSnippetMaxBytes,
+                        maxMatches: 2
+                    )
+                }
+                return emitContentMatch(
+                    path: path,
+                    snippets: snippets,
+                    rootPath: homeURL.path,
+                    displayRootPath: homeURL.path,
+                    ring: .expanded,
+                    isGlobalRoot: true,
+                    options: options,
+                    excludedNameSet: excludedNameSet,
+                    coordinator: coordinator
+                )
+            }
+            return
+        }
+
+        // Single SIMD `rg --json --fixed-strings -e term1 -e term2 ...` pass!
+        guard let rg = resolveRgPath() else { return }
+        var arguments = [
+            "--json",
+            "--ignore-case",
+            "--fixed-strings",
+            "--max-count", "\(options.maxMatchesPerFile)",
+            "--no-messages",
+        ]
+        if options.maxContentFileSizeMB > 0 {
+            arguments.append(contentsOf: ["--max-filesize", "\(options.maxContentFileSizeMB)M"])
+        }
+        if !options.respectGitignoreInContent {
+            arguments.append("--no-ignore")
+        }
+        if options.showHiddenFiles {
+            arguments.append("--hidden")
+        }
+        if let maxDepth = options.maxDepth {
+            arguments.append(contentsOf: ["--max-depth", "\(maxDepth + 1)"])
+        }
+        for excluded in options.excludedNames where !excluded.isEmpty {
+            arguments.append(contentsOf: ["--glob", "!\(excluded)"])
+        }
+        if isGlobalRoot {
+            for rel in options.excludedGlobalRelativePaths where !rel.isEmpty {
+                let clean = rel.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                arguments.append(contentsOf: ["--glob", "!\(clean)/**"])
+            }
+        }
+        for term in cleanTerms {
+            arguments.append(contentsOf: ["-e", term])
+        }
+        arguments.append(root.path)
+
+        _ = try? await StreamingProcessRunner.run(
+            executable: rg,
+            arguments: arguments,
+            timeoutSeconds: min(6.0, options.timeoutSeconds),
+            preferNUL: false
+        ) { jsonLine in
+            guard let event = RipgrepJSONParser.parseLine(jsonLine) else {
+                return !coordinator.isLimitReached
+            }
+            return emitContentMatch(
+                path: event.path,
+                snippets: [event.snippet],
+                rootPath: root.path,
+                displayRootPath: root.path,
+                ring: .expanded,
+                isGlobalRoot: isGlobalRoot,
+                options: options,
+                excludedNameSet: excludedNameSet,
+                coordinator: coordinator
+            )
         }
     }
 

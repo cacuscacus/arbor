@@ -27,6 +27,7 @@ final class ArborAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        MLXExpansionService.terminateHelperSync()
         MainActor.assumeIsolated {
             BrowserSessionStore.shared.saveNow()
         }

@@ -81,17 +81,20 @@ Shipped in [**v1.9.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.9.0)
 
 ### 1d — Optional local LLM term expansion (MLX)
 
-Goal: bridge vocabulary mismatches in filename & content search (e.g., `"factura luz"` → `edenor`, `receipt`, `electricity`, `invoice`; `"login timeout"` → `auth_session_expired`) completely offline on Apple Silicon — **strictly opt-in and off by default**.
+Shipped in [**v1.10.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.10.0). Goal: bridge vocabulary mismatches in filename & content search (e.g., `"factura luz"` → `electricity`, `bill`, `utility`, `invoice`, `meter`; `"rate limit"` → `throttling`, `quota`, `burst`) completely offline on Apple Silicon — **strictly opt-in and off by default**.
 
-- ⬚ **Settings → Search → Smart Expansion (MLX)**:
-  - Master toggle (OFF by default — zero downloads or extra RAM unless enabled)
-  - User-selectable quantized model tiers: `0.6B` (fast / low RAM), `2B` / `4B` (balanced sweet spot), `9B` (high accuracy for 32+ GB Macs), plus custom model path/ID and quantization choice (`4-bit` / `8-bit`)
-  - Configurable idle unload TTL (e.g., unload weights from RAM after 2–5 min idle) and RAM budget guard
-- ⬚ **Pre-implementation benchmark**: run a reproducible local eval script (~25–30 Spanish/English/code queries) across `0.6B / 2B / 4B / 9B` in `4-bit` vs `8-bit` measuring TTFT, total latency, peak RAM, and term-expansion quality to pick sensible presets
-- ⬚ **Non-blocking, transparent UX & isolation**:
-  - Run MLX in an isolated helper process (`arbor-llm-helper` / XPC) so memory or Metal pressure never freezes or crashes the browser UI
-  - Literal search runs immediately; term expansion triggers asynchronously after typing pause (~400–500 ms) and cancels on new input
-  - Display expanded terms as editable chips/pills under the search bar (one click to remove noisy terms) with stopword filtering before feeding into `fd` / `rg`
+- ✓ **Reproducible local benchmark (`scripts/bench-mlx-expansion.py`, `scripts/bench-mlx-queries.json`)**: evaluated 5 quantized Qwen models (`Qwen3-0.6B-4bit`, `Qwen3.5-0.8B-4bit`, `Qwen3.5-2B-4bit`, `Qwen3.5-2B-8bit`, `Qwen3.5-4B-4bit`) across 24 bilingual ES/EN/dev queries on Apple M4 Max:
+  - `Qwen3.5-2B-8bit` hit the sweet spot (**100% JSON**, **100% hit rate 24/24**, **231 ms** median, **2.39 GB** Metal)
+  - `Qwen3.5-0.8B-4bit` covers 8 GB Macs (**87.5% hit**, **165 ms**, **0.72 GB**)
+  - `Qwen3.5-4B-4bit` covers higher bilingual richness (**100% hit**, **365 ms**, **2.94 GB**)
+- ✓ **Settings → Search → Smart Expansion (Local MLX · Opt-in)**:
+  - Master toggle (**OFF by default** — zero downloads or extra RAM unless enabled)
+  - Curated presets (`0.8B 4-bit`, `2B 4-bit`, `2B 8-bit Recommended`, `4B 4-bit`, `9B 4-bit`, plus custom HF repo ID or local path)
+  - Auto-detected `mlx-lm` Python runtime (with optional override), configurable idle auto-unload TTL (`2 / 5 / 10 min / Keep loaded`), **Unload Model** button, and live **Test Expansion** widget
+- ✓ **Non-blocking, transparent UX & isolation (`MLXExpansionService`, `arbor_mlx_helper.py`, `SearchQueryExpander`)**:
+  - Runs MLX in an isolated helper child process (`arbor_mlx_helper.py`) with idle auto-unload and clean shutdown on quit so Metal pressure or crashes never affect the browser UI
+  - Literal search runs immediately (0 ms added delay); term expansion triggers asynchronously after ~420 ms pause (with LRU cache + stopword/echo post-processing)
+  - Displays expanded terms as removable pill chips inside the search bar, runs expanded hits in a single `rg -e` / `mdfind ||` / `fd` pass in `SearchRing.expanded` strictly below literal hits, and badges related content hits with `✨ Related`
 
 ### 1e — Finder-parity UX & daily-driver polish
 
