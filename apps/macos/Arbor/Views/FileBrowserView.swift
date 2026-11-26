@@ -97,6 +97,7 @@ private struct LocalFileBrowserView: View {
 
     @State private var listingTask: Task<Void, Never>?
     @State private var mutationTask: Task<Void, Never>?
+    @State private var volumeAvailableBytes: Int64?
     @State private var showsGoToFolder = false
     /// Item to select once a navigation finishes (Go to Folder on a file).
     @State private var pendingSelection: ItemRef?
@@ -228,6 +229,7 @@ private struct LocalFileBrowserView: View {
                 BreadcrumbBar(
                     directory: navigation.current,
                     dragState: dragState,
+                    statusSummary: statusBarSummary,
                     onNavigate: { target in navigate(to: target) },
                     onTransfer: handleTransfer
                 )
@@ -481,11 +483,6 @@ private struct LocalFileBrowserView: View {
                 if renamingItem != nil || searchFocused { return .ignored }
                 return openSelection()
             }
-            .onKeyPress(.delete) {
-                guard isActive else { return .ignored }
-                if renamingItem != nil || searchFocused { return .ignored }
-                return moveSelectionToTrash()
-            }
             .onKeyPress(.space) {
                 guard isActive else { return .ignored }
                 // Only the text field itself should swallow Space — search
@@ -579,7 +576,52 @@ private struct LocalFileBrowserView: View {
                     .allowsHitTesting(false)
 
                 Button("") { _ = moveSelectionToTrash() }
-                    .keyboardShortcut(.delete, modifiers: [])
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { requestPermanentDeleteSelection() }
+                    .keyboardShortcut(.delete, modifiers: [.command, .option])
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty || !capabilities.contains(.remove))
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { beginCreateItem(.folder) }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(isSearchActive || !capabilities.contains(.create))
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") {
+                    let targets = selectedVisibleEntries()
+                    guard !targets.isEmpty else { return }
+                    showInfo(for: targets)
+                }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(selection.isEmpty || !capabilities.contains(.metadata))
+                .opacity(0)
+                .allowsHitTesting(false)
+
+                Button("") { _ = openSelection() }
+                    .keyboardShortcut("o", modifiers: .command)
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { _ = openSelection() }
+                    .keyboardShortcut(.downArrow, modifiers: .command)
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { displaySettings.viewMode = .list }
+                    .keyboardShortcut("1", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { displaySettings.viewMode = .icons }
+                    .keyboardShortcut("2", modifiers: .command)
                     .opacity(0)
                     .allowsHitTesting(false)
 
@@ -589,14 +631,27 @@ private struct LocalFileBrowserView: View {
                     .opacity(0)
                     .allowsHitTesting(false)
 
-                Button("") { cutSelection() }
-                    .keyboardShortcut("x", modifiers: .command)
+                Button("") { copySelection() }
+                    .keyboardShortcut("c", modifiers: .command)
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty)
                     .opacity(0)
                     .allowsHitTesting(false)
 
-                Button("") { pasteCutItems() }
+                Button("") { cutSelection() }
+                    .keyboardShortcut("x", modifiers: .command)
+                    .disabled(renamingItem != nil || searchFocused || selection.isEmpty)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { pasteClipboard(forceMove: false) }
                     .keyboardShortcut("v", modifiers: .command)
-                    .disabled(FileClipboard.shared.cutItems.isEmpty)
+                    .disabled(renamingItem != nil || searchFocused || !capabilities.contains(.transfer))
+                    .opacity(0)
+                    .allowsHitTesting(false)
+
+                Button("") { pasteClipboard(forceMove: true) }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
+                    .disabled(renamingItem != nil || searchFocused || !capabilities.contains(.transfer))
                     .opacity(0)
                     .allowsHitTesting(false)
             }
@@ -838,15 +893,26 @@ private struct LocalFileBrowserView: View {
     @ViewBuilder
     private var emptySpaceContextMenu: some View {
         if !isSearchActive {
-            if capabilities.contains(.transfer), FileClipboard.shared.hasCutItems {
-                Button("Paste Item") { pasteCutItems() }
+            if capabilities.contains(.transfer), FileClipboard.shared.canPaste {
+                let count = FileClipboard.shared.pasteCount
+                let pasteLabel = FileClipboard.shared.defaultPasteIsMove
+                    ? (count == 1 ? "Move Item Here" : "Move \(count) Items Here")
+                    : (count == 1 ? "Paste Item" : "Paste \(count) Items")
+                Button(pasteLabel) { pasteClipboard(forceMove: false) }
                     .keyboardShortcut("v", modifiers: .command)
+                if !FileClipboard.shared.defaultPasteIsMove {
+                    Button(count == 1 ? "Move Item Here" : "Move \(count) Items Here") {
+                        pasteClipboard(forceMove: true)
+                    }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
+                }
                 Divider()
             }
             if capabilities.contains(.create) {
                 Button("New Folder…") {
                     beginCreateItem(.folder)
                 }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("New Empty File…") {
                     beginCreateItem(.file)
                 }
@@ -888,6 +954,10 @@ private struct LocalFileBrowserView: View {
                 commitContextSelection(anchor: anchor)
                 openTargets(previewTargets(for: anchor), fromDoubleClick: false)
             }
+        }
+
+        if targets.count == 1, let only = targets.first, !only.isBrowsable, let fileURL = only.localURL {
+            openWithMenu(for: fileURL)
         }
 
         if targets.count == 1, let only = targets.first, only.isBrowsable {
@@ -936,11 +1006,30 @@ private struct LocalFileBrowserView: View {
         }
 
         if capabilities.contains(.transfer), !targets.isEmpty {
+            Button(targets.count == 1 ? "Copy" : "Copy \(targets.count) Items") {
+                commitContextSelection(anchor: anchor)
+                copySelection()
+            }
+            .keyboardShortcut("c", modifiers: .command)
+
             Button("Cut") {
                 commitContextSelection(anchor: anchor)
                 cutSelection()
             }
             .keyboardShortcut("x", modifiers: .command)
+        }
+
+        if localURLs.count == targets.count, !localURLs.isEmpty {
+            if targets.count == 1, let onlyURL = localURLs.first, ArchiveNameResolver.isSupportedArchive(onlyURL) {
+                Button("Extract Archive") {
+                    commitContextSelection(anchor: anchor)
+                    extractArchive(onlyURL)
+                }
+            }
+            Button(targets.count == 1 ? "Compress \"\(targets[0].name)\"" : "Compress \(targets.count) Items") {
+                commitContextSelection(anchor: anchor)
+                compressItems(localURLs)
+            }
         }
 
         if capabilities.contains(.rename),
@@ -1225,7 +1314,11 @@ private struct LocalFileBrowserView: View {
     }
 
     private func presentSearch() {
-        guard localPath != nil, capabilities.contains(.search) else { return }
+        guard localPath != nil, capabilities.contains(.search) else {
+            transferErrorTitle = "Search Unavailable"
+            transferErrorMessage = "Search is currently supported on local folders only."
+            return
+        }
         search.isPresented = true
         DispatchQueue.main.async {
             searchFocused = true
@@ -1266,6 +1359,7 @@ private struct LocalFileBrowserView: View {
                 pruneSelection(to: Set(entries.map(\.id)))
                 refreshVisibleEntries()
                 applyPendingSelection()
+                refreshVolumeAvailableBytes()
             } catch is CancellationError {
                 return
             } catch {
@@ -1465,7 +1559,79 @@ private struct LocalFileBrowserView: View {
         }
     }
 
-    // MARK: - Cut / paste
+    // MARK: - Copy / Cut / Paste & Archives
+
+    private var statusBarSummary: String {
+        let selected = visibleEntries.filter { selection.contains($0.id) }
+        let selectedBytes = selected.reduce(UInt64(0)) { sum, entry in
+            entry.isDirectory ? sum : sum + entry.size
+        }
+        return StatusBarSummary.format(
+            itemCount: visibleEntries.count,
+            selectedCount: selected.count,
+            selectedBytes: selectedBytes,
+            availableBytes: volumeAvailableBytes
+        )
+    }
+
+    private func refreshVolumeAvailableBytes() {
+        guard let localPath else {
+            volumeAvailableBytes = nil
+            return
+        }
+        Task.detached(priority: .utility) {
+            let values = try? localPath.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            let free = values?.volumeAvailableCapacityForImportantUsage
+            await MainActor.run {
+                self.volumeAvailableBytes = free
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func openWithMenu(for fileURL: URL) -> some View {
+        let apps = NSWorkspace.shared.urlsForApplications(toOpen: fileURL)
+        if !apps.isEmpty {
+            let defaultApp = NSWorkspace.shared.urlForApplication(toOpen: fileURL)
+            let sortedApps = apps.sorted { lhs, rhs in
+                if lhs == defaultApp { return true }
+                if rhs == defaultApp { return false }
+                return lhs.deletingPathExtension().lastPathComponent
+                    .localizedCaseInsensitiveCompare(rhs.deletingPathExtension().lastPathComponent) == .orderedAscending
+            }
+            Menu("Open With") {
+                ForEach(sortedApps.prefix(12), id: \.self) { appURL in
+                    let appName = appURL.deletingPathExtension().lastPathComponent
+                    let isDefault = (appURL == defaultApp)
+                    Button {
+                        NSWorkspace.shared.open(
+                            [fileURL],
+                            withApplicationAt: appURL,
+                            configuration: NSWorkspace.OpenConfiguration()
+                        )
+                    } label: {
+                        Label {
+                            Text(isDefault ? "\(appName) (default)" : appName)
+                        } icon: {
+                            Image(nsImage: Self.menuAppIcon(for: appURL))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func menuAppIcon(for appURL: URL) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+
+    private func copySelection() {
+        let targets = selectedVisibleEntries().map(\.id)
+        guard !targets.isEmpty else { return }
+        FileClipboard.shared.copy(targets)
+    }
 
     private func cutSelection() {
         let targets = selectedVisibleEntries().map(\.id)
@@ -1473,15 +1639,53 @@ private struct LocalFileBrowserView: View {
         FileClipboard.shared.cut(targets)
     }
 
-    /// Moves the cut items into the selected folder (or the current folder).
-    private func pasteCutItems() {
-        let items = FileClipboard.shared.takeCutItems()
-        guard !items.isEmpty else { return }
+    /// Pastes copied/cut items (or external Finder pasteboard files) into the selected
+    /// folder or the current folder. `forceMove == true` implements Finder's `⌘⌥V`.
+    private func pasteClipboard(forceMove: Bool) {
+        guard let payload = FileClipboard.shared.takeForPaste(forceMove: forceMove) else { return }
         let destination = PasteDestinationResolver.resolve(
             selectedFolders: selectedVisibleEntries().filter(\.isBrowsable).map(\.id),
             currentFolder: navigation.current
         )
-        handleTransfer(items, into: destination, operation: .move)
+        handleTransfer(payload.items, into: destination, operation: payload.operation)
+    }
+
+    private func compressItems(_ urls: [URL]) {
+        guard let destinationDir = localPath ?? urls.first?.deletingLastPathComponent() else { return }
+        mutationTask = Task {
+            do {
+                let archiveURL = try await ArchiveService.compress(urls: urls, in: destinationDir)
+                let createdRef = LocalFileLocation.item(for: archiveURL)
+                reload()
+                selection = [createdRef]
+                BrowserListingDidChange.post(folders: [LocalFileLocation.item(for: destinationDir)])
+            } catch {
+                transferErrorTitle = "Compress Failed"
+                transferErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func extractArchive(_ archiveURL: URL) {
+        let destinationDir = localPath ?? archiveURL.deletingLastPathComponent()
+        mutationTask = Task {
+            do {
+                let extractedURL = try await ArchiveService.extract(archiveURL: archiveURL, in: destinationDir)
+                let createdRef = LocalFileLocation.item(for: extractedURL)
+                reload()
+                selection = [createdRef]
+                BrowserListingDidChange.post(folders: [LocalFileLocation.item(for: destinationDir)])
+            } catch {
+                transferErrorTitle = "Extract Failed"
+                transferErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func requestPermanentDeleteSelection() {
+        let targets = visibleEntries.filter { selection.contains($0.id) }
+        guard !targets.isEmpty, capabilities.contains(.remove) else { return }
+        permanentDeleteTargets = targets
     }
 
     private func beginCreateItem(_ kind: CreateItemKind) {

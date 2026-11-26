@@ -28,6 +28,7 @@ let package = Package(
                 "ContentSearchEngine.swift",
                 "SearchQueryExpander.swift",
                 "SearchPreferencesStore.swift",
+                "FinderParityHelpers.swift",
             ]
         ),
         .testTarget(

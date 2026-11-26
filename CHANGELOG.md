@@ -11,6 +11,18 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-11-25
+
+### Added
+
+- **Real Copy / Cut / Paste / Move Here (`⌘C` / `⌘X` / `⌘V` / `⌘⌥V`)**: `FileClipboard` now integrates with `NSPasteboard.general` so files copy and paste seamlessly between Arbor, Finder, Slack, and Mail, while supporting Finder's `⌘⌥V` (**Move Items Here**) and automatic detection of newer files copied externally
+- **macOS Finder muscle-memory shortcuts**: **`⌘⌫`** moves to Trash (preventing accidental bare-Delete trashing), **`⌘⌥⌫`** triggers Permanent Delete confirmation, **`⌘⇧N`** creates a New Folder, **`⌘I`** opens Get Info, **`⌘O`** / **`⌘↓`** opens the selection, and **`⌘1`** / **`⌘2`** switch between List and Icon view
+- **Live Sidebar Locations & Mounted Volumes (`MountedVolumesStore`)**: unified **Locations** section displays internal disks, external USB drives, DMGs, and network shares with live mount/unmount updates, free-space tooltips, and one-click **Eject (`⏏`)** alongside SSH locations; removed non-interactive placeholder rows
+- **Compact inline status bar (`BreadcrumbBar` + `StatusBarSummary`)**: displays item count, selection count with byte total, and available volume capacity right on the bottom bar
+- **Open With… & Compress / Extract (`.zip`)**: file context menu now includes an **Open With** submenu (native app icons + default app via `NSWorkspace.urlsForApplications(toOpen:)`) and Finder-compatible **Compress** / **Extract Archive** powered by `/usr/bin/ditto` (`ArchiveService`) with collision-safe naming (`ArchiveNameResolver`)
+- **Clear remote search feedback**: invoking `⌘F` on remote SSH folders now shows a clear message instead of failing silently
+- **Pure unit test suite (`FinderParityTests`)**: 4 new tests covering archive collision-safe naming, status bar summary formatting, and copy/cut/paste/Finder-override clipboard resolution (100 Swift tests total)
+
 ## [1.10.0] — 2026-11-25
 
 ### Added

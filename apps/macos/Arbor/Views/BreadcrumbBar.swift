@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct BreadcrumbBar: View {
     let directory: ItemRef
     var dragState: FileDragState = FileDragState()
+    var statusSummary: String? = nil
     var onNavigate: (ItemRef) -> Void
     var onTransfer: (([ItemRef], ItemRef, FileTransferOperation) -> Void)? = nil
 
@@ -38,55 +39,66 @@ struct BreadcrumbBar: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
-                    HStack(spacing: 4) {
-                        Button {
-                            onNavigate(crumb.item)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(nsImage: FileIcon.image(for: crumb.item, size: 14))
-                                    .resizable()
-                                    .interpolation(.high)
-                                    .frame(width: 14, height: 14)
-                                Text(crumb.name)
-                                    .lineLimit(1)
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
+                        HStack(spacing: 4) {
+                            Button {
+                                onNavigate(crumb.item)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(nsImage: FileIcon.image(for: crumb.item, size: 14))
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .frame(width: 14, height: 14)
+                                    Text(crumb.name)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
+                            .help(crumb.item.path)
+
+                            // The separator belongs to the crumb on its left: dropping
+                            // on it moves up into that ancestor, which is what the
+                            // gesture means when you drag from a deep folder.
+                            if index < crumbs.count - 1 {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
-                        .help(crumb.item.path)
-
-                        // The separator belongs to the crumb on its left: dropping
-                        // on it moves up into that ancestor, which is what the
-                        // gesture means when you drag from a deep folder.
-                        if index < crumbs.count - 1 {
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 3)
+                        .frame(height: 22)
+                        .contentShape(Rectangle())
+                        .background {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(
+                                    targetedIndex == index
+                                        ? Color.accentColor.opacity(0.2)
+                                        : Color.clear
+                                )
                         }
+                        .onDrop(
+                            of: [.fileURL],
+                            delegate: crumbDropDelegate(crumb: crumb, index: index)
+                        )
                     }
-                    .padding(.horizontal, 3)
-                    .frame(height: 22)
-                    .contentShape(Rectangle())
-                    .background {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(
-                                targetedIndex == index
-                                    ? Color.accentColor.opacity(0.2)
-                                    : Color.clear
-                            )
-                    }
-                    .onDrop(
-                        of: [.fileURL],
-                        delegate: crumbDropDelegate(crumb: crumb, index: index)
-                    )
                 }
+                .padding(.leading, 8)
+                .padding(.vertical, 3)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+
+            if let statusSummary, !statusSummary.isEmpty {
+                Text(statusSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .padding(.trailing, 10)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.bar)

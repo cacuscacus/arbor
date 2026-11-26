@@ -21,6 +21,7 @@ struct SidebarView: View {
     @State private var transferTargetID: UUID?
     @State private var transferErrorMessage: String?
     @State private var sshLocations = SSHLocationStore.shared
+    @State private var volumesStore = MountedVolumesStore.shared
     @State private var showingSSHLocationSheet = false
     @Namespace private var favoritesNamespace
 
@@ -43,15 +44,16 @@ struct SidebarView: View {
                         delegate: makeDropDelegate(insertIndex: favorites.items.count)
                     )
 
-                placesHeader
+                locationsHeader
                     .padding(.top, 12)
+
+                ForEach(volumesStore.volumes) { volume in
+                    volumeRow(volume)
+                }
 
                 ForEach(sshLocations.locations) { profile in
                     sshLocationRow(profile)
                 }
-                placesRow("Recents", systemImage: "clock")
-                placesRow("Volumes", systemImage: "externaldrive")
-                placesRow("Git Repositories", systemImage: "chevron.left.forwardslash.chevron.right")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
@@ -242,9 +244,9 @@ struct SidebarView: View {
             .textCase(.uppercase)
     }
 
-    private var placesHeader: some View {
+    private var locationsHeader: some View {
         HStack {
-            Text("Places")
+            Text("Locations")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
@@ -403,12 +405,84 @@ struct SidebarView: View {
             .opacity(0.95)
     }
 
-    private func placesRow(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+    private func volumeRow(_ volume: MountedVolume) -> some View {
+        let isCurrent = volume.itemRef == navigation.current
+        return HStack(spacing: 4) {
+            Button {
+                navigation.go(to: volume.itemRef)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: volume.systemImage)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                    Text(volume.name)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if volume.canEject {
+                Button {
+                    ejectVolume(volume)
+                } label: {
+                    Image(systemName: "eject.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Eject \(volume.name)")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isCurrent ? Color.primary.opacity(0.08) : Color.clear)
+        }
+        .help(volumeHelp(volume))
+        .contextMenu {
+            Button("Open in New Window") {
+                WindowLaunchCoordinator.openNewWindow(cloning: volume.itemRef)
+            }
+            if let onOpenInSplit {
+                Button("Open in Split") {
+                    onOpenInSplit(volume.itemRef)
+                }
+            }
+            if volume.canEject {
+                Divider()
+                Button("Eject \"\(volume.name)\"") {
+                    ejectVolume(volume)
+                }
+            }
+        }
+    }
+
+    private func volumeHelp(_ volume: MountedVolume) -> String {
+        if let free = volume.availableCapacity {
+            let formatted = ByteCountFormatter.string(fromByteCount: free, countStyle: .file)
+            return "\(volume.url.path) — \(formatted) available"
+        }
+        return volume.url.path
+    }
+
+    private func ejectVolume(_ volume: MountedVolume) {
+        let wasInsideVolume = navigation.current.path.hasPrefix(volume.url.path) && volume.url.path != "/"
+        Task {
+            do {
+                try await volumesStore.eject(volume)
+                if wasInsideVolume {
+                    navigation.go(to: LocalFileLocation.item(for: FileManager.default.homeDirectoryForCurrentUser))
+                }
+            } catch {
+                transferErrorMessage = "Could not eject \(volume.name): \(error.localizedDescription)"
+            }
+        }
     }
 }
 

@@ -98,22 +98,23 @@ Shipped in [**v1.10.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.10.
 
 ### 1e — Finder-parity UX & daily-driver polish
 
-High-leverage desktop UX improvements identified against macOS Finder (without cloning unnecessary Finder bloat):
+Core daily-driver polish shipped in [**v1.11.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.11.0):
 
-- ⬚ **Real Copy/Paste (`⌘C` / `⌘V` / `⌘⌥V`)**: extend `FileClipboard` beyond Cut-only and integrate with `NSPasteboard.general` so files copy/paste seamlessly between Arbor, Finder, Slack, Mail, etc.
-- ⬚ **macOS muscle-memory shortcuts**: move Trash from bare `Delete` to `⌘⌫` (plus `⌘⌥⌫` permanent delete), add `⌘⇧N` (New Folder), `⌘I` (Get Info), `⌘O` / `⌘↓` (Open), `⌘1` / `⌘2` (List / Icons), and **type-to-select** (type-ahead) in both List and Icon views
-- ⬚ **Sidebar Places cleanup**: wire `Volumes` (mounted disks/DMGs + Eject) and `Git Repositories` / `Recents`, or hide non-interactive placeholder rows until wired
-- ⬚ **Compact status bar**: item count, selection count + total size, and free disk space (toggleable or inline with the breadcrumb bar)
-- ⬚ **Everyday file actions & feedback**:
-  - Inline New Folder / New File creation (create + enter rename directly)
-  - **Compress (`.zip`) / Extract** and **Open With…** (via `NSWorkspace.urlsForApplications(toOpen:)`)
-  - Transfer progress indicator + cancel button for slow local copies and SFTP jobs
-  - Async recursive folder size calculation in `Get Info` (cancellable on close)
-- ⬚ **Listing & search polish**:
-  - ✓ `Show Enclosing Folder` available for both files and folders in search results, selecting and revealing the item (`pendingSelection`)
-  - Right-click column headers in List view to toggle visible columns
-  - Optional collapsible Preview/Inspector sidebar (`⌘⇧P`, reusing Quick Look / Markdown / code renderers) and/or Column View (`⌘3`)
+- ✓ **Real Copy/Paste (`⌘C` / `⌘X` / `⌘V` / `⌘⌥V`)**: extended `FileClipboard` with `NSPasteboard.general` integration so files copy/paste seamlessly between Arbor, Finder, Slack, Mail, etc., plus Finder's **Move Items Here** (`⌘⌥V`)
+- ✓ **macOS muscle-memory shortcuts**: moved Trash from bare `Delete` to **`⌘⌫`** (plus **`⌘⌥⌫`** permanent delete with confirmation), added **`⌘⇧N`** (New Folder), **`⌘I`** (Get Info), **`⌘O`** / **`⌘↓`** (Open), **`⌘1`** / **`⌘2`** (List / Icons)
+- ✓ **Sidebar Locations & Volumes with Eject (`MountedVolumesStore`)**: unified **Locations** section showing mounted disks, external drives, DMGs, and network shares with live mount/unmount refresh and Finder-equivalent **Eject (`⏏`)**, alongside SSH locations (removed dead placeholder rows)
+- ✓ **Compact inline status bar (`BreadcrumbBar` + `StatusBarSummary`)**: item count, selection count + byte total, and available disk space inline on the bottom bar
+- ✓ **Everyday file actions**:
+  - **Open With…** submenu via `NSWorkspace.urlsForApplications(toOpen:)` with native app icons and default-app marker
+  - **Compress (`.zip`) / Extract** backed by `/usr/bin/ditto` with automatic collision-safe naming (`ArchiveService` + `ArchiveNameResolver`)
   - Clear feedback when invoking `⌘F` on unsupported remote locations (until Phase 6e remote search lands)
+- ⬚ **Remaining optional polish**:
+  - Type-to-select (type-ahead) in List and Icon views
+  - Inline New Folder / New File creation (create + enter rename directly)
+  - Transfer progress indicator + cancel button for slow local copies and SFTP jobs
+  - Async recursive folder size calculation in `Get Info`
+  - Right-click column headers in List view to toggle visible columns
+  - Optional collapsible Preview/Inspector sidebar (`⌘⇧P`) and/or Column View (`⌘3`)
 
 ---
 
