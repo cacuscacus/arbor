@@ -283,6 +283,7 @@ nonisolated enum SearchPathFilter {
     static func matchesFilename(_ name: String, pattern: FilenameSearchPattern) -> Bool {
         switch pattern.kind {
         case .substring(let text):
+            if text.isEmpty { return true }
             return name.localizedCaseInsensitiveContains(text)
         case .glob(let glob):
             return glob.withCString { patternC in

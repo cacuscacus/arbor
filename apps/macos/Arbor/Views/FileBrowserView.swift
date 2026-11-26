@@ -508,6 +508,14 @@ private struct LocalFileBrowserView: View {
             isExpandingTerms: search.isExpandingTerms,
             expandedTerms: search.activeExpandedTerms,
             expansionError: search.expansionError,
+            activeFilters: search.parsedQuery.filters,
+            onAddFilter: { token in
+                search.appendFilter(token)
+                searchFocused = true
+            },
+            onRemoveFilter: { index in
+                search.removeFilter(at: index)
+            },
             onToggleSmartExpansion: {
                 search.toggleSmartExpansionForSession()
                 if isSearchActive {
@@ -821,11 +829,14 @@ private struct LocalFileBrowserView: View {
                 systemImage: search.mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass",
                 description: Text(emptySearchDescription)
             )
-        } else if search.mode == .content {
+        } else if search.mode == .content && !search.parsedQuery.isFilterOnly {
+            let hasFilterRow = search.parsedQuery.hasFilters
+            let hasExpansionRow = !search.activeExpandedTerms.isEmpty || search.isExpandingTerms
+            let contentExtraTop: CGFloat = (hasFilterRow ? 26 : 0) + (hasExpansionRow ? 26 : 0)
             ContentSearchResultsView(
                 hits: search.hits,
                 selection: $selection,
-                extraTopPadding: (!search.activeExpandedTerms.isEmpty || search.isExpandingTerms) ? 26 : 0,
+                extraTopPadding: contentExtraTop,
                 onOpen: { entry in
                     cancelRename()
                     openDoubleClicked(entry)

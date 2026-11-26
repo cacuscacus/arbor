@@ -27,6 +27,7 @@ let package = Package(
                 "SearchEngine.swift",
                 "ContentSearchEngine.swift",
                 "SearchQueryExpander.swift",
+                "SearchQueryParser.swift",
                 "SearchPreferencesStore.swift",
                 "FinderParityHelpers.swift",
             ]

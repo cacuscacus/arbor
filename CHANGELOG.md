@@ -11,6 +11,20 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-11-25
+
+### Added
+
+- **Structured Search Query Language (`SearchQueryParser`)**: combine free text with structured filters across both **Name** and **Content** search (and filter-only queries with zero free text!):
+  - **`ext:`** — extension matching with comma OR lists and negation (`ext:swift`, `ext:ts,tsx`, `-ext:lock`)
+  - **`kind:`** — semantic file categories with English & Spanish aliases and negation (`kind:folder`, `kind:image`, `kind:pdf`, `kind:document`, `kind:code`, `kind:video`, `kind:audio`, `kind:archive`, `kind:app`, `-kind:folder`)
+  - **`size>` / `size<` / `size:`** — SI & binary units plus inclusive ranges (`size>10mb`, `size<=500kb`, `size:100kb..5mb`, `size>=1mib`)
+  - **`modified:` / `mod:`** — relative keywords (`today`, `yesterday`, `week`, `month`, `year`), durations (`24h`, `7d`, `2w`, `6m`, `modified>30d`), ISO dates (`modified>2026-01-01`, `modified:2026-11`), and date ranges (`modified:2026-01-01..2026-06-30`)
+  - **Quoted literals**: wrap tokens in quotes (e.g. `"size>10mb"`) to search for them verbatim inside code or filenames
+- **Native backend pushdown + authoritative filtering (`SearchService`)**: compiles structured filters directly into native `fd` flags (`--extension`, `--type`, `--size`, `--changed-within`/`--changed-before`), `rg --glob` extension filters, and Spotlight `mdfind` predicates (`kMDItemFSSize`, `kMDItemFSContentChangeDate`, `kMDItemContentTypeTree`), while enforcing authoritative post-filtering across all concentric rings (including opt-in MLX `.expanded` hits, which now expand only the free-text portion)
+- **Interactive Filter Chips & Quick Filter Menu (`SearchBarView`)**: recognized filters render as removable capsule pills below the search bar (clicking `×` removes only that token), accompanied by a compact Quick Filter menu (`Kind`, `Extension`, `Size`, `Modified`) for one-click query building
+- **Pure unit tests (`SearchQueryParserTests`)**: 7 new tests covering extensions, bilingual kinds, sizes/ranges, relative & ISO dates, quoted literals, chip editing, and `fd`/`rg`/`mdfind` pushdown generation (112 Swift tests total)
+
 ## [1.12.0] — 2026-11-25
 
 ### Added

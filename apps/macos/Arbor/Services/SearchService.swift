@@ -239,21 +239,22 @@ nonisolated enum SearchService {
         AsyncThrowingStream { continuation in
             let worker = Task.detached(priority: .userInitiated) {
                 let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let parsed = SearchQueryParser.parse(trimmed)
                 let coordinator = SearchStreamCoordinator(
                     limit: options.resultLimit,
                     continuation: continuation
                 )
-                guard !trimmed.isEmpty else {
+                guard !parsed.isEmpty else {
                     coordinator.finish(defaultReason: .completed)
                     return
                 }
 
                 do {
-                    switch mode {
-                    case .name:
-                        let pattern = FilenameSearchPattern(trimmed)
+                    if mode == .name || parsed.isFilterOnly {
+                        let pattern = FilenameSearchPattern(parsed.textQuery)
                         try await executeFilenameSearch(
                             pattern: pattern,
+                            parsedQuery: parsed,
                             scope: scope,
                             currentFolder: currentFolder.standardizedFileURL,
                             seedEntries: seedEntries,
@@ -265,6 +266,7 @@ nonisolated enum SearchService {
                         if coordinator.totalCount == 0, pattern.isGlob, !Task.isCancelled {
                             try await executeFilenameSearch(
                                 pattern: pattern.literalFallback,
+                                parsedQuery: parsed,
                                 scope: scope,
                                 currentFolder: currentFolder.standardizedFileURL,
                                 seedEntries: seedEntries,
@@ -274,20 +276,21 @@ nonisolated enum SearchService {
                         }
 
                         // Opt-in local MLX expanded terms run in the outer `.expanded` ring
-                        // strictly below literal matches.
-                        if !options.expandedTerms.isEmpty, !coordinator.isLimitReached, !Task.isCancelled {
+                        // strictly below literal matches (only when free text is present).
+                        if !parsed.isFilterOnly, !options.expandedTerms.isEmpty, !coordinator.isLimitReached, !Task.isCancelled {
                             try await executeExpandedFilenameSearch(
                                 terms: options.expandedTerms,
+                                parsedQuery: parsed,
                                 scope: scope,
                                 currentFolder: currentFolder.standardizedFileURL,
                                 options: options,
                                 coordinator: coordinator
                             )
                         }
-
-                    case .content:
+                    } else {
                         try await executeContentSearch(
-                            query: trimmed,
+                            query: parsed.textQuery,
+                            parsedQuery: parsed,
                             scope: scope,
                             currentFolder: currentFolder.standardizedFileURL,
                             options: options,
@@ -297,6 +300,7 @@ nonisolated enum SearchService {
                         if !options.expandedTerms.isEmpty, !coordinator.isLimitReached, !Task.isCancelled {
                             try await executeExpandedContentSearch(
                                 terms: options.expandedTerms,
+                                parsedQuery: parsed,
                                 scope: scope,
                                 currentFolder: currentFolder.standardizedFileURL,
                                 options: options,
@@ -351,6 +355,7 @@ nonisolated enum SearchService {
 
     private static func executeFilenameSearch(
         pattern: FilenameSearchPattern,
+        parsedQuery: ParsedSearchQuery,
         scope: SearchScope,
         currentFolder: URL,
         seedEntries: [FileEntry],
@@ -360,6 +365,7 @@ nonisolated enum SearchService {
         let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
         let displayRootPath = (scope == .global ? homeURL : currentFolder).path
         let excludedNames = Set(options.excludedNames)
+        let now = Date()
 
         // Ring 0: Instant in-memory match against current folder's loaded children.
         let shouldRunLocalRings = (scope == .currentFolder) || options.progressiveScoping
@@ -368,6 +374,7 @@ nonisolated enum SearchService {
             for entry in seedEntries {
                 try Task.checkCancellation()
                 guard SearchPathFilter.matchesFilename(entry.name, pattern: pattern) else { continue }
+                guard parsedQuery.matches(entry: entry, now: now) else { continue }
                 if SearchPathFilter.isExcluded(
                     path: entry.fullPath,
                     rootPath: folderPath,
@@ -396,6 +403,7 @@ nonisolated enum SearchService {
         case .currentFolder:
             try await searchSubtree(
                 pattern: pattern,
+                parsedQuery: parsedQuery,
                 root: currentFolder,
                 displayRootPath: displayRootPath,
                 ring: .currentFolderSubtree,
@@ -411,6 +419,7 @@ nonisolated enum SearchService {
                     group.addTask {
                         try await searchSubtree(
                             pattern: pattern,
+                            parsedQuery: parsedQuery,
                             root: currentFolder,
                             displayRootPath: displayRootPath,
                             ring: .currentFolderSubtree,
@@ -422,6 +431,7 @@ nonisolated enum SearchService {
                     group.addTask {
                         try await searchGlobal(
                             pattern: pattern,
+                            parsedQuery: parsedQuery,
                             homeURL: homeURL,
                             options: options,
                             coordinator: coordinator
@@ -432,6 +442,7 @@ nonisolated enum SearchService {
             } else {
                 try await searchGlobal(
                     pattern: pattern,
+                    parsedQuery: parsedQuery,
                     homeURL: homeURL,
                     options: options,
                     coordinator: coordinator
@@ -444,6 +455,7 @@ nonisolated enum SearchService {
 
     private static func executeContentSearch(
         query: String,
+        parsedQuery: ParsedSearchQuery,
         scope: SearchScope,
         currentFolder: URL,
         options: SearchOptions,
@@ -456,6 +468,7 @@ nonisolated enum SearchService {
         case .currentFolder:
             try await searchContentSubtree(
                 query: query,
+                parsedQuery: parsedQuery,
                 root: currentFolder,
                 displayRootPath: displayRootPath,
                 ring: .currentFolderSubtree,
@@ -471,6 +484,7 @@ nonisolated enum SearchService {
                     group.addTask {
                         try await searchContentSubtree(
                             query: query,
+                            parsedQuery: parsedQuery,
                             root: currentFolder,
                             displayRootPath: displayRootPath,
                             ring: .currentFolderSubtree,
@@ -482,6 +496,7 @@ nonisolated enum SearchService {
                     group.addTask {
                         try await searchGlobalContent(
                             query: query,
+                            parsedQuery: parsedQuery,
                             homeURL: homeURL,
                             options: options,
                             coordinator: coordinator
@@ -492,6 +507,7 @@ nonisolated enum SearchService {
             } else {
                 try await searchGlobalContent(
                     query: query,
+                    parsedQuery: parsedQuery,
                     homeURL: homeURL,
                     options: options,
                     coordinator: coordinator
@@ -502,6 +518,7 @@ nonisolated enum SearchService {
 
     private static func searchGlobalContent(
         query: String,
+        parsedQuery: ParsedSearchQuery,
         homeURL: URL,
         options: SearchOptions,
         coordinator: SearchStreamCoordinator
@@ -512,6 +529,7 @@ nonisolated enum SearchService {
             do {
                 let succeeded = try await searchContentWithSpotlight(
                     query: query,
+                    parsedQuery: parsedQuery,
                     homeURL: homeURL,
                     options: options,
                     coordinator: coordinator
@@ -526,6 +544,7 @@ nonisolated enum SearchService {
 
         try await searchContentSubtree(
             query: query,
+            parsedQuery: parsedQuery,
             root: homeURL,
             displayRootPath: homeURL.path,
             ring: .global,
@@ -537,6 +556,7 @@ nonisolated enum SearchService {
 
     private static func searchContentSubtree(
         query: String,
+        parsedQuery: ParsedSearchQuery,
         root: URL,
         displayRootPath: String,
         ring: SearchRing,
@@ -547,6 +567,7 @@ nonisolated enum SearchService {
         let excludedNameSet = Set(options.excludedNames)
         if let ranRg = try await searchContentWithRipgrep(
             query: query,
+            parsedQuery: parsedQuery,
             root: root,
             displayRootPath: displayRootPath,
             ring: ring,
@@ -569,6 +590,7 @@ nonisolated enum SearchService {
             emitContentMatch(
                 path: path,
                 snippets: snippets,
+                parsedQuery: parsedQuery,
                 rootPath: root.path,
                 displayRootPath: displayRootPath,
                 ring: ring,
@@ -585,6 +607,7 @@ nonisolated enum SearchService {
 
     private static func searchContentWithRipgrep(
         query: String,
+        parsedQuery: ParsedSearchQuery,
         root: URL,
         displayRootPath: String,
         ring: SearchRing,
@@ -623,6 +646,7 @@ nonisolated enum SearchService {
                 arguments.append(contentsOf: ["--glob", "!\(clean)/**"])
             }
         }
+        arguments.append(contentsOf: parsedQuery.ripgrepGlobArguments())
         arguments.append(contentsOf: ["--", query, root.path])
 
         coordinator.flushRunning(backend: .ripgrep)
@@ -638,6 +662,7 @@ nonisolated enum SearchService {
             return emitContentMatch(
                 path: event.path,
                 snippets: [event.snippet],
+                parsedQuery: parsedQuery,
                 rootPath: root.path,
                 displayRootPath: displayRootPath,
                 ring: ring,
@@ -665,13 +690,16 @@ nonisolated enum SearchService {
 
     private static func searchContentWithSpotlight(
         query: String,
+        parsedQuery: ParsedSearchQuery,
         homeURL: URL,
         options: SearchOptions,
         coordinator: SearchStreamCoordinator
     ) async throws -> Bool {
         let homePath = homeURL.path
         let excludedNameSet = Set(options.excludedNames)
-        let predicate = "kMDItemTextContent == '*\(escapeSpotlightLiteral(query))*'cd"
+        var clauses = ["kMDItemTextContent == '*\(escapeSpotlightLiteral(query))*'cd"]
+        clauses.append(contentsOf: parsedQuery.spotlightPredicateClauses())
+        let predicate = clauses.joined(separator: " && ")
 
         coordinator.flushRunning(backend: .spotlightContent)
         let outcome = try await StreamingProcessRunner.run(
@@ -709,6 +737,7 @@ nonisolated enum SearchService {
             return emitContentMatch(
                 path: path,
                 snippets: snippets,
+                parsedQuery: parsedQuery,
                 rootPath: homePath,
                 displayRootPath: homePath,
                 ring: .global,
@@ -737,6 +766,7 @@ nonisolated enum SearchService {
 
     private static func executeExpandedFilenameSearch(
         terms: [String],
+        parsedQuery: ParsedSearchQuery,
         scope: SearchScope,
         currentFolder: URL,
         options: SearchOptions,
@@ -751,9 +781,11 @@ nonisolated enum SearchService {
         let excludedNameSet = Set(options.excludedNames)
 
         if isGlobalRoot {
-            // Single Spotlight OR predicate across all expanded terms.
-            let clauses = cleanTerms.map { "kMDItemFSName == '*\(escapeSpotlightLiteral($0))*'cd" }
-            let predicate = clauses.joined(separator: " || ")
+            // Single Spotlight OR predicate across all expanded terms + structured filters.
+            let termClauses = cleanTerms.map { "kMDItemFSName == '*\(escapeSpotlightLiteral($0))*'cd" }
+            var allClauses = ["(\(termClauses.joined(separator: " || ")))"]
+            allClauses.append(contentsOf: parsedQuery.spotlightPredicateClauses())
+            let predicate = allClauses.joined(separator: " && ")
             _ = try? await StreamingProcessRunner.run(
                 executable: "/usr/bin/mdfind",
                 arguments: ["-0", "-onlyin", homeURL.path, predicate],
@@ -762,6 +794,7 @@ nonisolated enum SearchService {
             ) { path in
                 emitPath(
                     path,
+                    parsedQuery: parsedQuery,
                     rootPath: homeURL.path,
                     displayRootPath: homeURL.path,
                     ring: .expanded,
@@ -775,7 +808,7 @@ nonisolated enum SearchService {
         }
 
         if let fd = resolveFdPath() {
-            // Single `fd --regex` pass with escaped literal alternation.
+            // Single `fd --regex` pass with escaped literal alternation + structured filters.
             let regex = cleanTerms.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
             let fdCap = min(10_000, max(options.resultLimit, 300))
             var arguments = [
@@ -794,6 +827,7 @@ nonisolated enum SearchService {
             if options.showHiddenFiles {
                 arguments.append("--hidden")
             }
+            arguments.append(contentsOf: parsedQuery.fdArguments())
             arguments.append(contentsOf: [regex, root.path])
 
             _ = try? await StreamingProcessRunner.run(
@@ -804,6 +838,7 @@ nonisolated enum SearchService {
             ) { path in
                 emitPath(
                     path,
+                    parsedQuery: parsedQuery,
                     rootPath: root.path,
                     displayRootPath: root.path,
                     ring: .expanded,
@@ -818,6 +853,7 @@ nonisolated enum SearchService {
 
     private static func executeExpandedContentSearch(
         terms: [String],
+        parsedQuery: ParsedSearchQuery,
         scope: SearchScope,
         currentFolder: URL,
         options: SearchOptions,
@@ -832,8 +868,10 @@ nonisolated enum SearchService {
         let excludedNameSet = Set(options.excludedNames)
 
         if isGlobalRoot && !options.deepGlobalContentScan {
-            let clauses = cleanTerms.map { "kMDItemTextContent == '*\(escapeSpotlightLiteral($0))*'cd" }
-            let predicate = clauses.joined(separator: " || ")
+            let termClauses = cleanTerms.map { "kMDItemTextContent == '*\(escapeSpotlightLiteral($0))*'cd" }
+            var allClauses = ["(\(termClauses.joined(separator: " || ")))"]
+            allClauses.append(contentsOf: parsedQuery.spotlightPredicateClauses())
+            let predicate = allClauses.joined(separator: " && ")
             _ = try? await StreamingProcessRunner.run(
                 executable: "/usr/bin/mdfind",
                 arguments: ["-0", "-onlyin", homeURL.path, predicate],
@@ -866,6 +904,7 @@ nonisolated enum SearchService {
                 return emitContentMatch(
                     path: path,
                     snippets: snippets,
+                    parsedQuery: parsedQuery,
                     rootPath: homeURL.path,
                     displayRootPath: homeURL.path,
                     ring: .expanded,
@@ -908,6 +947,7 @@ nonisolated enum SearchService {
                 arguments.append(contentsOf: ["--glob", "!\(clean)/**"])
             }
         }
+        arguments.append(contentsOf: parsedQuery.ripgrepGlobArguments())
         for term in cleanTerms {
             arguments.append(contentsOf: ["-e", term])
         }
@@ -925,6 +965,7 @@ nonisolated enum SearchService {
             return emitContentMatch(
                 path: event.path,
                 snippets: [event.snippet],
+                parsedQuery: parsedQuery,
                 rootPath: root.path,
                 displayRootPath: root.path,
                 ring: .expanded,
@@ -940,6 +981,7 @@ nonisolated enum SearchService {
 
     private static func searchGlobal(
         pattern: FilenameSearchPattern,
+        parsedQuery: ParsedSearchQuery,
         homeURL: URL,
         options: SearchOptions,
         coordinator: SearchStreamCoordinator
@@ -947,6 +989,7 @@ nonisolated enum SearchService {
         do {
             let succeeded = try await searchWithSpotlight(
                 pattern: pattern,
+                parsedQuery: parsedQuery,
                 homeURL: homeURL,
                 options: options,
                 coordinator: coordinator
@@ -960,6 +1003,7 @@ nonisolated enum SearchService {
 
         try await searchSubtree(
             pattern: pattern,
+            parsedQuery: parsedQuery,
             root: homeURL,
             displayRootPath: homeURL.path,
             ring: .global,
@@ -971,6 +1015,7 @@ nonisolated enum SearchService {
 
     private static func searchSubtree(
         pattern: FilenameSearchPattern,
+        parsedQuery: ParsedSearchQuery,
         root: URL,
         displayRootPath: String,
         ring: SearchRing,
@@ -981,6 +1026,7 @@ nonisolated enum SearchService {
         let excludedNameSet = Set(options.excludedNames)
         if let ranFd = try await searchWithFd(
             pattern: pattern,
+            parsedQuery: parsedQuery,
             root: root,
             displayRootPath: displayRootPath,
             ring: ring,
@@ -1001,6 +1047,7 @@ nonisolated enum SearchService {
         ) { path in
             emitPath(
                 path,
+                parsedQuery: parsedQuery,
                 rootPath: root.path,
                 displayRootPath: displayRootPath,
                 ring: ring,
@@ -1020,19 +1067,25 @@ nonisolated enum SearchService {
 
     private static func searchWithSpotlight(
         pattern: FilenameSearchPattern,
+        parsedQuery: ParsedSearchQuery,
         homeURL: URL,
         options: SearchOptions,
         coordinator: SearchStreamCoordinator
     ) async throws -> Bool {
         let homePath = homeURL.path
         let excludedNameSet = Set(options.excludedNames)
-        let namePredicate: String
-        switch pattern.kind {
-        case .substring(let text):
-            namePredicate = "kMDItemFSName == '*\(escapeSpotlightLiteral(text))*'cd"
-        case .glob(let glob):
-            namePredicate = "kMDItemFSName == '\(escapeSpotlightGlob(glob))'cd"
+        var clauses: [String] = []
+        if !pattern.isEmpty {
+            switch pattern.kind {
+            case .substring(let text):
+                clauses.append("kMDItemFSName == '*\(escapeSpotlightLiteral(text))*'cd")
+            case .glob(let glob):
+                clauses.append("kMDItemFSName == '\(escapeSpotlightGlob(glob))'cd")
+            }
         }
+        clauses.append(contentsOf: parsedQuery.spotlightPredicateClauses())
+        guard !clauses.isEmpty else { return false }
+        let predicate = clauses.joined(separator: " && ")
 
         coordinator.flushRunning(backend: .spotlight)
         let outcome = try await StreamingProcessRunner.run(
@@ -1040,13 +1093,14 @@ nonisolated enum SearchService {
             arguments: [
                 "-0",
                 "-onlyin", homePath,
-                namePredicate,
+                predicate,
             ],
             timeoutSeconds: options.timeoutSeconds,
             preferNUL: true
         ) { path in
             emitPath(
                 path,
+                parsedQuery: parsedQuery,
                 rootPath: homePath,
                 displayRootPath: homePath,
                 ring: .global,
@@ -1091,6 +1145,7 @@ nonisolated enum SearchService {
 
     private static func searchWithFd(
         pattern: FilenameSearchPattern,
+        parsedQuery: ParsedSearchQuery,
         root: URL,
         displayRootPath: String,
         ring: SearchRing,
@@ -1123,6 +1178,7 @@ nonisolated enum SearchService {
         if options.showHiddenFiles {
             arguments.append("--hidden")
         }
+        arguments.append(contentsOf: parsedQuery.fdArguments())
 
         let query: String
         switch pattern.kind {
@@ -1144,6 +1200,7 @@ nonisolated enum SearchService {
         ) { path in
             emitPath(
                 path,
+                parsedQuery: parsedQuery,
                 rootPath: root.path,
                 displayRootPath: displayRootPath,
                 ring: ring,
@@ -1192,6 +1249,7 @@ nonisolated enum SearchService {
 
     private static func emitPath(
         _ rawPath: String,
+        parsedQuery: ParsedSearchQuery,
         rootPath: String,
         displayRootPath: String,
         ring: SearchRing,
@@ -1222,6 +1280,9 @@ nonisolated enum SearchService {
         guard let entry = materializeEntry(at: path, displayRootPath: displayRootPath) else {
             return true
         }
+        guard parsedQuery.matches(entry: entry) else {
+            return true
+        }
         let hit = SearchHit(id: entry.id, entry: entry, ring: ring)
         return coordinator.append(canonicalPath: path, ring: ring, hit: hit)
     }
@@ -1229,6 +1290,7 @@ nonisolated enum SearchService {
     private static func emitContentMatch(
         path rawPath: String,
         snippets: [ContentMatchSnippet],
+        parsedQuery: ParsedSearchQuery,
         rootPath: String,
         displayRootPath: String,
         ring: SearchRing,
@@ -1253,13 +1315,23 @@ nonisolated enum SearchService {
             return true
         }
 
+        var preMaterialized: FileEntry?
+        if parsedQuery.hasFilters {
+            guard let entry = materializeEntry(at: path, displayRootPath: displayRootPath),
+                  parsedQuery.matches(entry: entry)
+            else {
+                return true
+            }
+            preMaterialized = entry
+        }
+
         return coordinator.upsertContent(
             canonicalPath: path,
             ring: ring,
             newSnippets: snippets,
             maxPerFile: options.maxMatchesPerFile
         ) {
-            let entry = materializeEntry(at: path, displayRootPath: displayRootPath) ?? FileEntry(
+            let entry = preMaterialized ?? materializeEntry(at: path, displayRootPath: displayRootPath) ?? FileEntry(
                 id: LocalFileLocation.item(for: URL(fileURLWithPath: path)),
                 name: (path as NSString).lastPathComponent,
                 isDirectory: false,
@@ -1320,6 +1392,19 @@ nonisolated enum SearchService {
         )
     }
     #endif
+}
+
+private nonisolated extension ParsedSearchQuery {
+    func matches(entry: FileEntry, now: Date = Date()) -> Bool {
+        matches(
+            name: entry.name,
+            isDirectory: entry.isDirectory,
+            isPackage: entry.isPackage,
+            size: entry.size,
+            modified: entry.modified,
+            now: now
+        )
+    }
 }
 
 private nonisolated extension FileEntry {

@@ -34,7 +34,7 @@ Priorities may shift. **macOS remains the reference implementation**; other OS p
 - ✓ Back / Forward navigation stack (with scroll-position restore)
 - ⬚ Directory tree
 - ◐ Filename search (`fd` / Spotlight / walk in the macOS app; not yet driven by `arbor-core`)
-- ⬚ Query language: `kind:`, `ext:`, `size>`, `modified:`
+- ✓ Query language: `kind:`, `ext:`, `size>`, `modified:` (shipped in [**v1.13.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.13.0) across Name & Content search with native `fd`/`rg`/`mdfind` pushdown and interactive filter chips)
 - ⬚ Virtual scrolling for large directories
 - ✓ Directory listing watchers (auto-refresh when the folder changes outside Arbor) — visible tab panes only, debounced
 

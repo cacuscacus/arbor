@@ -13,6 +13,9 @@ struct SearchBarView: View {
     var isExpandingTerms: Bool = false
     var expandedTerms: [String] = []
     var expansionError: String? = nil
+    var activeFilters: [SearchFilterToken] = []
+    var onAddFilter: ((String) -> Void)? = nil
+    var onRemoveFilter: ((Int) -> Void)? = nil
     var onToggleSmartExpansion: (() -> Void)? = nil
     var onDismissExpandedTerm: ((String) -> Void)? = nil
     var onStop: (() -> Void)? = nil
@@ -84,6 +87,10 @@ struct SearchBarView: View {
                 .frame(width: 132)
                 .help("Search scope")
 
+                if let onAddFilter {
+                    filterMenu(onAddFilter: onAddFilter)
+                }
+
                 if let onToggleSmartExpansion {
                     Button(action: onToggleSmartExpansion) {
                         Image(systemName: smartExpansionActive ? "sparkles" : "sparkles")
@@ -137,12 +144,105 @@ struct SearchBarView: View {
                 }
             }
 
+            if !activeFilters.isEmpty {
+                filterChipsBar
+            }
+
             if showsExpansionBar {
                 expansionBar
             }
         }
         .padding(.leading, 4)
         .padding(.trailing, 2)
+    }
+
+    private func filterMenu(onAddFilter: @escaping (String) -> Void) -> some View {
+        Menu {
+            Menu("Kind") {
+                Button("Folders (kind:folder)") { onAddFilter("kind:folder") }
+                Button("Images (kind:image)") { onAddFilter("kind:image") }
+                Button("PDFs (kind:pdf)") { onAddFilter("kind:pdf") }
+                Button("Documents (kind:document)") { onAddFilter("kind:document") }
+                Button("Code (kind:code)") { onAddFilter("kind:code") }
+                Button("Videos (kind:video)") { onAddFilter("kind:video") }
+                Button("Audio (kind:audio)") { onAddFilter("kind:audio") }
+                Button("Archives (kind:archive)") { onAddFilter("kind:archive") }
+            }
+
+            Menu("Extension") {
+                Button(".swift (ext:swift)") { onAddFilter("ext:swift") }
+                Button(".ts / .tsx (ext:ts,tsx)") { onAddFilter("ext:ts,tsx") }
+                Button(".rs (ext:rs)") { onAddFilter("ext:rs") }
+                Button(".py (ext:py)") { onAddFilter("ext:py") }
+                Button(".json (ext:json)") { onAddFilter("ext:json") }
+                Button(".md (ext:md)") { onAddFilter("ext:md") }
+                Button(".pdf (ext:pdf)") { onAddFilter("ext:pdf") }
+                Button(".png / .jpg (ext:png,jpg)") { onAddFilter("ext:png,jpg") }
+            }
+
+            Menu("Size") {
+                Button("Larger than 1 MB (size>1mb)") { onAddFilter("size>1mb") }
+                Button("Larger than 10 MB (size>10mb)") { onAddFilter("size>10mb") }
+                Button("Larger than 100 MB (size>100mb)") { onAddFilter("size>100mb") }
+                Button("Smaller than 100 KB (size<100kb)") { onAddFilter("size<100kb") }
+            }
+
+            Menu("Modified") {
+                Button("Today (modified:today)") { onAddFilter("modified:today") }
+                Button("Last 24 hours (modified:24h)") { onAddFilter("modified:24h") }
+                Button("Last 7 days (modified:7d)") { onAddFilter("modified:7d") }
+                Button("Last 30 days (modified:30d)") { onAddFilter("modified:30d") }
+                Button("Older than 1 year (modified>1y)") { onAddFilter("modified>1y") }
+            }
+        } label: {
+            Image(systemName: activeFilters.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(activeFilters.isEmpty ? Color.secondary : Color.accentColor)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 3)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Add structured search filter (ext:, kind:, size>, modified:)")
+    }
+
+    private var filterChipsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(activeFilters.enumerated()), id: \.element.id) { index, filter in
+                    HStack(spacing: 4) {
+                        Image(systemName: filter.iconName)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(filter.displayLabel)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.primary)
+                        if let onRemoveFilter {
+                            Button {
+                                onRemoveFilter(index)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove filter '\(filter.rawToken)'")
+                        }
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+                    }
+                }
+            }
+            .padding(.leading, 4)
+            .padding(.bottom, 1)
+        }
+        .frame(maxWidth: 640, alignment: .leading)
     }
 
     private var showsExpansionBar: Bool {
@@ -206,13 +306,13 @@ struct SearchBarView: View {
     private var placeholder: String {
         switch (mode, scope) {
         case (.name, .currentFolder):
-            return "Search folder — try *.json"
+            return "Search — ext:swift, size>1mb, modified:7d"
         case (.name, .global):
-            return "Search home — try blabla*.json"
+            return "Search home — kind:pdf modified:7d"
         case (.content, .currentFolder):
-            return "Search text in folder…"
+            return "Search text — try auth ext:swift"
         case (.content, .global):
-            return "Search text across home…"
+            return "Search text in home — invoice kind:pdf"
         }
     }
 

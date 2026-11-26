@@ -50,8 +50,20 @@ final class SearchSession {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    var parsedQuery: ParsedSearchQuery {
+        SearchQueryParser.parse(trimmedQuery)
+    }
+
     var isActive: Bool {
         !trimmedQuery.isEmpty
+    }
+
+    func removeFilter(at index: Int) {
+        query = parsedQuery.removingFilter(at: index)
+    }
+
+    func appendFilter(_ token: String) {
+        query = parsedQuery.appendingFilter(token)
     }
 
     var showsPanel: Bool {
@@ -149,9 +161,11 @@ final class SearchSession {
 
         let currentScope = scope
         let currentMode = mode
+        let parsed = SearchQueryParser.parse(trimmed)
+        let expansionText = parsed.textQuery
         let prefs = SearchPreferencesStore.shared
         let modelID = prefs.resolvedSmartExpansionModelID
-        let currentKey = "\(modelID)|\(currentMode.rawValue)|\(SearchExpansionPostProcessor.normalize(trimmed))"
+        let currentKey = "\(modelID)|\(currentMode.rawValue)|\(SearchExpansionPostProcessor.normalize(expansionText))"
         if expandedKey != currentKey {
             expandedTerms = []
             dismissedExpandedTerms = []
@@ -160,7 +174,7 @@ final class SearchSession {
             expandedKey = nil
         }
 
-        let activeTerms = activeExpandedTerms
+        let activeTerms = expansionText.isEmpty ? [] : activeExpandedTerms
         let options = prefs.makeOptions(
             showHiddenFiles: showHiddenFiles,
             resultLimitOverride: limitOverride,
@@ -170,8 +184,8 @@ final class SearchSession {
         )
         let debounceMs: Int = {
             if immediate { return 0 }
-            if currentMode == .content { return trimmed.count < 3 ? 350 : 220 }
-            if currentScope == .global, trimmed.count == 1 { return 340 }
+            if currentMode == .content { return expansionText.count < 3 ? 350 : 220 }
+            if currentScope == .global, !parsed.hasFilters, expansionText.count == 1 { return 340 }
             return 150
         }()
 
@@ -183,8 +197,9 @@ final class SearchSession {
         case (.name, .global): activeBackend = .spotlight
         case (.name, .currentFolder): activeBackend = .fd
         case (.content, .global):
-            activeBackend = options.deepGlobalContentScan ? .ripgrep : .spotlightContent
-        case (.content, .currentFolder): activeBackend = .ripgrep
+            activeBackend = parsed.isFilterOnly ? .spotlight : (options.deepGlobalContentScan ? .ripgrep : .spotlightContent)
+        case (.content, .currentFolder):
+            activeBackend = parsed.isFilterOnly ? .fd : .ripgrep
         }
 
         let startedAt = ContinuousClock.now
@@ -242,11 +257,12 @@ final class SearchSession {
         }
 
         // Launch asynchronous local MLX term expansion after a typing pause — never blocks literal search.
+        // Only expand the free-text portion (never structured filters or filter-only queries).
         let shouldExpand = !skipExpansionLaunch
             && isSmartExpansionActive
             && expandedKey != currentKey
-            && trimmed.count >= 3
-            && !FilenameSearchPattern(trimmed).isGlob
+            && expansionText.count >= 3
+            && !FilenameSearchPattern(expansionText).isGlob
         if shouldExpand {
             let pythonOverride = prefs.smartExpansionPythonPath
             let idleMinutes = prefs.smartExpansionIdleUnloadMinutes
@@ -261,14 +277,14 @@ final class SearchSession {
                 }
                 do {
                     let result = try await MLXExpansionService.shared.expand(
-                        query: trimmed,
+                        query: expansionText,
                         mode: currentMode,
                         modelID: modelID,
                         pythonPathOverride: pythonOverride,
                         idleUnloadMinutes: idleMinutes
                     )
                     guard !Task.isCancelled, let self else { return }
-                    guard self.trimmedQuery == trimmed, self.mode == currentMode else { return }
+                    guard self.parsedQuery.textQuery == expansionText, self.mode == currentMode else { return }
                     self.isExpandingTerms = false
                     self.expandedKey = currentKey
                     self.expandedTerms = result.terms
