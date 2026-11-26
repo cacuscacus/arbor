@@ -68,16 +68,16 @@ Shipped in [**v1.8.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.8.0)
 
 ### 1c — Content search (`grep` / `ripgrep`)
 
-Goal: fast, configurable text search inside files without turning Global search into an I/O storm.
+Shipped in [**v1.9.0**](https://github.com/cacuscacus/arbor/releases/tag/v1.9.0). Goal: fast, configurable text search inside files without turning Global search into an I/O storm.
 
-- ⬚ Mode toggle in search bar: **`Name` | `Content`**
-- ⬚ **Local / folder content search**: `rg --json` streaming (later promotable into `arbor-core` via `ignore` + `grep-searcher` + `grep-regex` to drop the external binary dependency), batching UI updates every ~80–120 ms
-- ⬚ **Global content search**: Spotlight `kMDItemTextContent` streaming by default (fast, indexes PDFs/docs, avoids cloud-file downloads) + explicit opt-in **Deep Scan (`rg`)** with strict exclusions and clear disk-scan notice
-- ⬚ **Sweet-spot limits in Settings → Search**:
+- ✓ Mode toggle in search bar: **`Name` | `Content`**
+- ✓ **Local / folder content search**: `rg --json` streaming with cycle-safe/size-bounded Swift fallback (`ContentFileScanner.walkAndScan`) when `rg` is unavailable, batching UI updates smoothly
+- ✓ **Global content search**: Spotlight `kMDItemTextContent` streaming by default (fast, indexes PDFs/docs, avoids cloud-file downloads, with inline preview snippets extracted for small local text files) + explicit opt-in **Deep Disk Scan (`rg`)** button in the status bar with strict exclusions
+- ✓ **Sweet-spot limits in Settings → Search → Content Search (grep)**:
   - Max file size for content grep (default `5 MB`; presets `1 MB / 5 MB / 25 MB / Unlimited`)
   - Respect `.gitignore` toggle (default ON for content, OFF for filename)
-  - Max matches per file / total result cap
-- ⬚ **Content-result UX**: show matching line snippet with highlight + line number; click for Quick Look / preview, double-click to open (or jump to line in editor), `Show Enclosing Folder` reveals and selects the hit
+  - Snippets per file (`3 / 5 / 10`) and Global default deep scan toggle
+- ✓ **Content-result UX (`ContentSearchResultsView`)**: file card with native icon, relative path, match badge, file size, and highlighted line-numbered monospaced snippets; click/multi-select, double-click to open, Quick Look (`Space`), and full right-click context menu (`Show Enclosing Folder`, etc.)
 
 ### 1d — Optional local LLM term expansion (MLX)
 

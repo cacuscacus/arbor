@@ -1,8 +1,8 @@
 cask "arbor" do
-  version "1.8.0"
+  version "1.9.0"
 
   on_arm do
-    sha256 "359b0b47befb319133f668b48184b98ea99425b5395b6b99553cf264d62839fe"
+    sha256 "7e828ee27d621019a981294e0914bc07ea373c02c03e1f639111d3d5f17f2ac4"
 
     url "https://github.com/cacuscacus/arbor/releases/download/v#{version}/Arbor-#{version}-macos-arm64.zip"
   end

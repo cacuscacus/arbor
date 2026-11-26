@@ -189,7 +189,7 @@ private struct LocalFileBrowserView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .id(
                     isSearchActive
-                        ? "search:\(search.scope)"
+                        ? "search:\(search.mode.rawValue):\(search.scope)"
                         : "\(navigation.current.volumeID.rawValue):\(navigation.current.path)"
                 )
 
@@ -197,6 +197,7 @@ private struct LocalFileBrowserView: View {
                 Divider()
                 SearchStatusBanner(
                     scope: search.scope,
+                    mode: search.mode,
                     folderName: pane.folderDisplayName,
                     backend: search.activeBackend,
                     isSearching: search.isSearching,
@@ -213,6 +214,10 @@ private struct LocalFileBrowserView: View {
                     onContinueTimeout: {
                         let base = search.timeoutOverride ?? SearchPreferencesStore.shared.timeoutSeconds
                         search.timeoutOverride = base + 10
+                        scheduleSearch(immediate: true)
+                    },
+                    onDeepScan: {
+                        search.deepGlobalContentOverride = true
                         scheduleSearch(immediate: true)
                     }
                 )
@@ -409,6 +414,12 @@ private struct LocalFileBrowserView: View {
                     scheduleSearch()
                 }
             }
+            .onChange(of: search.mode) { _, _ in
+                search.resetOverrides()
+                if isSearchActive {
+                    scheduleSearch(immediate: true)
+                }
+            }
     }
 
     private func applyBrowserSheets<Content: View>(to content: Content) -> some View {
@@ -490,6 +501,7 @@ private struct LocalFileBrowserView: View {
         return SearchBarView(
             query: $searchBinding.query,
             scope: $searchBinding.scope,
+            mode: $searchBinding.mode,
             isSearching: search.isSearching,
             resultCount: isSearchActive ? search.hits.count : nil,
             activeLimit: search.activeLimit,
@@ -737,8 +749,18 @@ private struct LocalFileBrowserView: View {
         } else if search.hits.isEmpty {
             ContentUnavailableView(
                 "No results",
-                systemImage: "magnifyingglass",
+                systemImage: search.mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass",
                 description: Text(emptySearchDescription)
+            )
+        } else if search.mode == .content {
+            ContentSearchResultsView(
+                hits: search.hits,
+                selection: $selection,
+                onOpen: { entry in
+                    cancelRename()
+                    openDoubleClicked(entry)
+                },
+                contextMenu: { entry in entryContextMenu(anchor: entry) }
             )
         } else {
             browserBody(entries: visibleEntries, showsLocation: true)

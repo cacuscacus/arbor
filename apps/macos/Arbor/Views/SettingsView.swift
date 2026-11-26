@@ -25,87 +25,129 @@ private struct SearchSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Limits & Safety Guardrails") {
-                Picker("Default result limit", selection: $prefs.resultLimit) {
-                    ForEach(SearchOptions.limitPresets, id: \.self) { count in
-                        Text("\(count) matches").tag(count)
-                    }
-                }
-                .help("Stops streaming once this many valid matches are found. You can still load more inline.")
-
-                Picker("Search timeout", selection: $prefs.timeoutSeconds) {
-                    ForEach(SearchOptions.timeoutPresets, id: \.self) { seconds in
-                        Text("\(Int(seconds)) seconds").tag(seconds)
-                    }
-                }
-                .help("Prevents stalled Spotlight or disk walks from hanging the app; partial results are kept.")
-
-                Picker("Max scanned entries (walk fallback)", selection: $prefs.maxVisitedNodes) {
-                    ForEach(SearchOptions.maxVisitedPresets, id: \.self) { count in
-                        Text("\(NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)) items")
-                            .tag(count)
-                    }
-                }
-
-                Picker("Maximum folder depth", selection: $prefs.maxDepth) {
-                    Text("Unlimited").tag(0)
-                    Text("6 levels").tag(6)
-                    Text("10 levels").tag(10)
-                    Text("20 levels").tag(20)
-                }
-            }
-
-            Section("Progressive Scoping & Tabs") {
-                Toggle("Search current folder first while Global runs", isOn: $prefs.progressiveScoping)
-                    .help("Shows instant matches from your current folder on top while Global results stream underneath.")
-                Toggle("Open Global searches in a new tab automatically", isOn: $prefs.openGlobalInNewTab)
-                    .help("Switching to Global opens a dedicated Search Tab so you can keep browsing in your current tab. You can also press ⌘⇧F anytime.")
-            }
-
-            Section("Exclusions") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Excluded folder names (comma-separated)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $excludedNamesText, prompt: Text(".git, node_modules, DerivedData, …"))
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(commitExclusions)
-                        .onChange(of: excludedNamesText) { _, value in
-                            prefs.excludedNames = SearchPreferencesStore.parseCSVList(value)
-                        }
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Excluded Global paths under Home (comma-separated)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $excludedGlobalPathsText, prompt: Text("Library/Caches, Library/CloudStorage, …"))
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(commitExclusions)
-                        .onChange(of: excludedGlobalPathsText) { _, value in
-                            prefs.excludedGlobalRelativePaths = SearchPreferencesStore.parseCSVList(value)
-                        }
-                    Text("Skipped during Global searches to avoid cache storms and cloud downloads. Searching inside them directly still works.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Section {
-                HStack {
-                    Spacer()
-                    Button("Reset Search Defaults") {
-                        prefs.resetDefaults()
-                        syncTextFields()
-                    }
-                }
-            }
+            limitsSection
+            progressiveSection
+            contentSearchSection
+            exclusionsSection
+            resetSection
         }
         .formStyle(.grouped)
         .padding()
         .onAppear(perform: syncTextFields)
+    }
+
+    @ViewBuilder
+    private var limitsSection: some View {
+        Section("Limits & Safety Guardrails") {
+            Picker("Default result limit", selection: $prefs.resultLimit) {
+                ForEach(SearchOptions.limitPresets, id: \.self) { count in
+                    Text("\(count) matches").tag(count)
+                }
+            }
+            .help("Stops streaming once this many valid matches are found. You can still load more inline.")
+
+            Picker("Search timeout", selection: $prefs.timeoutSeconds) {
+                ForEach(SearchOptions.timeoutPresets, id: \.self) { seconds in
+                    Text("\(Int(seconds)) seconds").tag(seconds)
+                }
+            }
+            .help("Prevents stalled Spotlight or disk walks from hanging the app; partial results are kept.")
+
+            Picker("Max scanned entries (walk fallback)", selection: $prefs.maxVisitedNodes) {
+                ForEach(SearchOptions.maxVisitedPresets, id: \.self) { count in
+                    Text("\(NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)) items")
+                        .tag(count)
+                }
+            }
+
+            Picker("Maximum folder depth", selection: $prefs.maxDepth) {
+                Text("Unlimited").tag(0)
+                Text("6 levels").tag(6)
+                Text("10 levels").tag(10)
+                Text("20 levels").tag(20)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var progressiveSection: some View {
+        Section("Progressive Scoping & Tabs") {
+            Toggle("Search current folder first while Global runs", isOn: $prefs.progressiveScoping)
+                .help("Shows instant matches from your current folder on top while Global results stream underneath.")
+            Toggle("Open Global searches in a new tab automatically", isOn: $prefs.openGlobalInNewTab)
+                .help("Switching to Global opens a dedicated Search Tab so you can keep browsing in your current tab. You can also press ⌘⇧F anytime.")
+        }
+    }
+
+    @ViewBuilder
+    private var contentSearchSection: some View {
+        Section("Content Search (grep)") {
+            Picker("Max file size", selection: $prefs.maxContentFileSizeMB) {
+                ForEach(SearchOptions.maxContentFileSizeMBPresets, id: \.self) { mb in
+                    Text(mb == 0 ? "Unlimited" : "\(mb) MB").tag(mb)
+                }
+            }
+            .help("Skips very large files (logs, bundles, datasets) during content search.")
+
+            Picker("Snippets per file", selection: $prefs.maxMatchesPerFile) {
+                ForEach(SearchOptions.maxMatchesPerFilePresets, id: \.self) { count in
+                    Text("\(count) lines").tag(count)
+                }
+            }
+
+            Toggle("Respect .gitignore rules", isOn: $prefs.respectGitignoreInContent)
+                .help("Skips git-ignored build outputs and caches when searching file contents with ripgrep.")
+
+            Toggle("Always use deep ripgrep scan for Global Content", isOn: $prefs.deepGlobalContentScan)
+                .help("Default uses Spotlight's instant text index for Global Content; turn this on to scan disk with ripgrep by default.")
+        }
+    }
+
+    @ViewBuilder
+    private var exclusionsSection: some View {
+        Section("Exclusions") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Excluded folder names (comma-separated)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $excludedNamesText, prompt: Text(".git, node_modules, DerivedData, …"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(commitExclusions)
+                    .onChange(of: excludedNamesText) { _, value in
+                        prefs.excludedNames = SearchPreferencesStore.parseCSVList(value)
+                    }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Excluded Global paths under Home (comma-separated)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $excludedGlobalPathsText, prompt: Text("Library/Caches, Library/CloudStorage, …"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(commitExclusions)
+                    .onChange(of: excludedGlobalPathsText) { _, value in
+                        prefs.excludedGlobalRelativePaths = SearchPreferencesStore.parseCSVList(value)
+                    }
+                Text("Skipped during Global searches to avoid cache storms and cloud downloads. Searching inside them directly still works.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resetSection: some View {
+        Section {
+            HStack {
+                Spacer()
+                Button("Reset Search Defaults") {
+                    prefs.resetDefaults()
+                    syncTextFields()
+                }
+            }
+        }
     }
 
     private func syncTextFields() {

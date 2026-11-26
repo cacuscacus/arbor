@@ -20,11 +20,21 @@ nonisolated enum SearchRing: Int, Comparable, CaseIterable, Hashable, Sendable {
     }
 }
 
+/// Filename vs file-content (`grep` / Spotlight text) search mode.
+nonisolated enum SearchMode: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case name = "Name"
+    case content = "Content"
+
+    var id: String { rawValue }
+}
+
 /// Which search engine produced results for a run.
 nonisolated enum SearchBackendKind: String, Hashable, Sendable {
     case inMemory = "Folder"
     case spotlight = "Spotlight"
+    case spotlightContent = "Spotlight Content"
     case fd = "fd"
+    case ripgrep = "ripgrep"
     case walk = "Disk Walk"
 }
 
@@ -42,9 +52,14 @@ nonisolated struct SearchOptions: Equatable, Sendable {
     static let defaultResultLimit = 500
     static let defaultTimeoutSeconds: Double = 10.0
     static let defaultMaxVisitedNodes = 150_000
+    static let defaultMaxContentFileSizeMB = 5
+    static let defaultMaxMatchesPerFile = 5
     static let limitPresets = [200, 500, 2_000, 5_000]
     static let timeoutPresets: [Double] = [5, 10, 20, 30]
     static let maxVisitedPresets = [50_000, 150_000, 500_000]
+    /// `0` means unlimited file size.
+    static let maxContentFileSizeMBPresets = [1, 5, 25, 0]
+    static let maxMatchesPerFilePresets = [3, 5, 10]
 
     static let defaultExcludedNames: [String] = [
         ".git",
@@ -77,6 +92,18 @@ nonisolated struct SearchOptions: Equatable, Sendable {
     var excludedNames: [String]
     var excludedGlobalRelativePaths: [String]
     var showHiddenFiles: Bool
+    /// Max file size (in MB) scanned during content grep (`0` = unlimited).
+    var maxContentFileSizeMB: Int
+    /// Whether content grep respects `.gitignore` rules (default `true`).
+    var respectGitignoreInContent: Bool
+    /// Max snippet matches kept per file in content search.
+    var maxMatchesPerFile: Int
+    /// When `true`, Global content search runs bounded `rg` on disk instead of Spotlight.
+    var deepGlobalContentScan: Bool
+
+    var maxContentFileSizeBytes: UInt64? {
+        maxContentFileSizeMB > 0 ? UInt64(maxContentFileSizeMB) * 1_024 * 1_024 : nil
+    }
 
     init(
         resultLimit: Int = Self.defaultResultLimit,
@@ -86,7 +113,11 @@ nonisolated struct SearchOptions: Equatable, Sendable {
         progressiveScoping: Bool = true,
         excludedNames: [String] = Self.defaultExcludedNames,
         excludedGlobalRelativePaths: [String] = Self.defaultExcludedGlobalRelativePaths,
-        showHiddenFiles: Bool = false
+        showHiddenFiles: Bool = false,
+        maxContentFileSizeMB: Int = Self.defaultMaxContentFileSizeMB,
+        respectGitignoreInContent: Bool = true,
+        maxMatchesPerFile: Int = Self.defaultMaxMatchesPerFile,
+        deepGlobalContentScan: Bool = false
     ) {
         self.resultLimit = max(1, resultLimit)
         self.timeoutSeconds = max(0.5, timeoutSeconds)
@@ -96,6 +127,10 @@ nonisolated struct SearchOptions: Equatable, Sendable {
         self.excludedNames = excludedNames
         self.excludedGlobalRelativePaths = excludedGlobalRelativePaths
         self.showHiddenFiles = showHiddenFiles
+        self.maxContentFileSizeMB = max(0, maxContentFileSizeMB)
+        self.respectGitignoreInContent = respectGitignoreInContent
+        self.maxMatchesPerFile = max(1, maxMatchesPerFile)
+        self.deepGlobalContentScan = deepGlobalContentScan
     }
 
     /// Next larger result limit preset when the user clicks "Load more".
@@ -278,7 +313,7 @@ nonisolated struct SearchRingMerger<Item: Sendable>: Sendable {
 
     let limit: Int
     private var buckets: [SearchRing: [Item]] = [:]
-    private var seenByPath: [String: SearchRing] = [:]
+    private var seenByPath: [String: (ring: SearchRing, index: Int)] = [:]
     private(set) var totalCount = 0
     private(set) var isLimitReached = false
 
@@ -310,13 +345,7 @@ nonisolated struct SearchRingMerger<Item: Sendable>: Sendable {
 
     @discardableResult
     mutating func insert(canonicalPath: String, ring: SearchRing, item: Item) -> InsertResult {
-        if let existingRing = seenByPath[canonicalPath] {
-            // Already present in an equal or closer ring — keep closer placement.
-            if existingRing <= ring {
-                return .duplicate
-            }
-            // Item arrived from a closer ring after an outer ring already saw it.
-            // Keep deduplicated count intact without disturbing outer ordering.
+        if seenByPath[canonicalPath] != nil {
             return .duplicate
         }
 
@@ -325,7 +354,44 @@ nonisolated struct SearchRingMerger<Item: Sendable>: Sendable {
             return .limitReached
         }
 
-        seenByPath[canonicalPath] = ring
+        let idx = buckets[ring, default: []].count
+        seenByPath[canonicalPath] = (ring, idx)
+        buckets[ring, default: []].append(item)
+        totalCount += 1
+        if totalCount >= limit {
+            isLimitReached = true
+        }
+        return .inserted
+    }
+
+    /// Inserts a new item or updates the existing item in-place (used to attach multiple
+    /// content-match snippets to a single file row without duplicating it).
+    @discardableResult
+    mutating func upsert(
+        canonicalPath: String,
+        ring: SearchRing,
+        create: () -> Item,
+        update: (inout Item) -> Bool
+    ) -> InsertResult {
+        if let loc = seenByPath[canonicalPath] {
+            guard var bucket = buckets[loc.ring], bucket.indices.contains(loc.index) else {
+                return .duplicate
+            }
+            let mutated = update(&bucket[loc.index])
+            if mutated {
+                buckets[loc.ring] = bucket
+            }
+            return .duplicate
+        }
+
+        if totalCount >= limit {
+            isLimitReached = true
+            return .limitReached
+        }
+
+        let item = create()
+        let idx = buckets[ring, default: []].count
+        seenByPath[canonicalPath] = (ring, idx)
         buckets[ring, default: []].append(item)
         totalCount += 1
         if totalCount >= limit {

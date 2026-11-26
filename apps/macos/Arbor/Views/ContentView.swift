@@ -726,7 +726,7 @@ private struct TabBarItem: View {
                         ProgressView()
                             .controlSize(.mini)
                     } else {
-                        Image(systemName: "magnifyingglass")
+                        Image(systemName: search.mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }

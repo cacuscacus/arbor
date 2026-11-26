@@ -49,6 +49,31 @@ final class SearchPreferencesStore {
         didSet { defaults.set(openGlobalInNewTab, forKey: Keys.openGlobalInNewTab) }
     }
 
+    /// Max file size (MB) scanned in content search (`0` = unlimited).
+    var maxContentFileSizeMB: Int {
+        didSet {
+            let clamped = max(0, maxContentFileSizeMB)
+            if clamped != maxContentFileSizeMB { maxContentFileSizeMB = clamped; return }
+            defaults.set(maxContentFileSizeMB, forKey: Keys.maxContentFileSizeMB)
+        }
+    }
+
+    var respectGitignoreInContent: Bool {
+        didSet { defaults.set(respectGitignoreInContent, forKey: Keys.respectGitignoreInContent) }
+    }
+
+    var maxMatchesPerFile: Int {
+        didSet {
+            let clamped = max(1, maxMatchesPerFile)
+            if clamped != maxMatchesPerFile { maxMatchesPerFile = clamped; return }
+            defaults.set(maxMatchesPerFile, forKey: Keys.maxMatchesPerFile)
+        }
+    }
+
+    var deepGlobalContentScan: Bool {
+        didSet { defaults.set(deepGlobalContentScan, forKey: Keys.deepGlobalContentScan) }
+    }
+
     var excludedNames: [String] {
         didSet { defaults.set(excludedNames, forKey: Keys.excludedNames) }
     }
@@ -67,6 +92,12 @@ final class SearchPreferencesStore {
         maxDepth = defaults.object(forKey: Keys.maxDepth) as? Int ?? 0
         progressiveScoping = defaults.object(forKey: Keys.progressiveScoping) as? Bool ?? true
         openGlobalInNewTab = defaults.object(forKey: Keys.openGlobalInNewTab) as? Bool ?? false
+        maxContentFileSizeMB = defaults.object(forKey: Keys.maxContentFileSizeMB) as? Int
+            ?? SearchOptions.defaultMaxContentFileSizeMB
+        respectGitignoreInContent = defaults.object(forKey: Keys.respectGitignoreInContent) as? Bool ?? true
+        maxMatchesPerFile = defaults.object(forKey: Keys.maxMatchesPerFile) as? Int
+            ?? SearchOptions.defaultMaxMatchesPerFile
+        deepGlobalContentScan = defaults.object(forKey: Keys.deepGlobalContentScan) as? Bool ?? false
         excludedNames = defaults.stringArray(forKey: Keys.excludedNames) ?? SearchOptions.defaultExcludedNames
         excludedGlobalRelativePaths = defaults.stringArray(forKey: Keys.excludedGlobalRelativePaths)
             ?? SearchOptions.defaultExcludedGlobalRelativePaths
@@ -75,7 +106,8 @@ final class SearchPreferencesStore {
     func makeOptions(
         showHiddenFiles: Bool,
         resultLimitOverride: Int? = nil,
-        timeoutOverride: Double? = nil
+        timeoutOverride: Double? = nil,
+        deepGlobalContentOverride: Bool? = nil
     ) -> SearchOptions {
         SearchOptions(
             resultLimit: resultLimitOverride ?? resultLimit,
@@ -85,7 +117,11 @@ final class SearchPreferencesStore {
             progressiveScoping: progressiveScoping,
             excludedNames: excludedNames,
             excludedGlobalRelativePaths: excludedGlobalRelativePaths,
-            showHiddenFiles: showHiddenFiles
+            showHiddenFiles: showHiddenFiles,
+            maxContentFileSizeMB: maxContentFileSizeMB,
+            respectGitignoreInContent: respectGitignoreInContent,
+            maxMatchesPerFile: maxMatchesPerFile,
+            deepGlobalContentScan: deepGlobalContentOverride ?? deepGlobalContentScan
         )
     }
 
@@ -96,6 +132,10 @@ final class SearchPreferencesStore {
         maxDepth = 0
         progressiveScoping = true
         openGlobalInNewTab = false
+        maxContentFileSizeMB = SearchOptions.defaultMaxContentFileSizeMB
+        respectGitignoreInContent = true
+        maxMatchesPerFile = SearchOptions.defaultMaxMatchesPerFile
+        deepGlobalContentScan = false
         excludedNames = SearchOptions.defaultExcludedNames
         excludedGlobalRelativePaths = SearchOptions.defaultExcludedGlobalRelativePaths
     }
@@ -118,6 +158,10 @@ final class SearchPreferencesStore {
         static let maxDepth = "arbor.search.maxDepth"
         static let progressiveScoping = "arbor.search.progressiveScoping"
         static let openGlobalInNewTab = "arbor.search.openGlobalInNewTab"
+        static let maxContentFileSizeMB = "arbor.search.maxContentFileSizeMB"
+        static let respectGitignoreInContent = "arbor.search.respectGitignoreInContent"
+        static let maxMatchesPerFile = "arbor.search.maxMatchesPerFile"
+        static let deepGlobalContentScan = "arbor.search.deepGlobalContentScan"
         static let excludedNames = "arbor.search.excludedNames"
         static let excludedGlobalRelativePaths = "arbor.search.excludedGlobalRelativePaths"
     }

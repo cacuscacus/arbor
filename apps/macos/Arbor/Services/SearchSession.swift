@@ -12,6 +12,7 @@ import Observation
 final class SearchSession {
     var query = ""
     var scope: SearchScope = .currentFolder
+    var mode: SearchMode = .name
     var isPresented = false
     /// Set when a tab is opened specifically for searching so the field focuses on appear.
     var focusRequestToken = 0
@@ -28,6 +29,7 @@ final class SearchSession {
 
     var limitOverride: Int?
     var timeoutOverride: Double?
+    var deepGlobalContentOverride: Bool?
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var elapsedTask: Task<Void, Never>?
@@ -69,6 +71,7 @@ final class SearchSession {
     func adopt(from source: SearchSession) {
         query = source.query
         scope = source.scope
+        mode = source.mode
         isPresented = true
         hits = source.hits
         countsByRing = source.countsByRing
@@ -78,6 +81,7 @@ final class SearchSession {
         errorMessage = source.errorMessage
         limitOverride = source.limitOverride
         timeoutOverride = source.timeoutOverride
+        deepGlobalContentOverride = source.deepGlobalContentOverride
         focusRequestToken &+= 1
     }
 
@@ -111,13 +115,16 @@ final class SearchSession {
         }
 
         let currentScope = scope
+        let currentMode = mode
         let options = SearchPreferencesStore.shared.makeOptions(
             showHiddenFiles: showHiddenFiles,
             resultLimitOverride: limitOverride,
-            timeoutOverride: timeoutOverride
+            timeoutOverride: timeoutOverride,
+            deepGlobalContentOverride: deepGlobalContentOverride
         )
         let debounceMs: Int = {
             if immediate { return 0 }
+            if currentMode == .content { return trimmed.count < 3 ? 350 : 220 }
             if currentScope == .global, trimmed.count == 1 { return 340 }
             return 150
         }()
@@ -126,7 +133,13 @@ final class SearchSession {
         errorMessage = nil
         stopReason = nil
         elapsedSeconds = 0
-        activeBackend = currentScope == .global ? .spotlight : .fd
+        switch (currentMode, currentScope) {
+        case (.name, .global): activeBackend = .spotlight
+        case (.name, .currentFolder): activeBackend = .fd
+        case (.content, .global):
+            activeBackend = options.deepGlobalContentScan ? .ripgrep : .spotlightContent
+        case (.content, .currentFolder): activeBackend = .ripgrep
+        }
 
         let startedAt = ContinuousClock.now
         elapsedTask = Task { [weak self] in
@@ -150,6 +163,7 @@ final class SearchSession {
                 let stream = SearchService.searchStream(
                     query: trimmed,
                     scope: currentScope,
+                    mode: currentMode,
                     currentFolder: folder,
                     seedEntries: seedEntries,
                     options: options
@@ -203,6 +217,7 @@ final class SearchSession {
     func resetOverrides() {
         limitOverride = nil
         timeoutOverride = nil
+        deepGlobalContentOverride = nil
     }
 
     func clear() {
@@ -214,6 +229,7 @@ final class SearchSession {
         elapsedSeconds = 0
         limitOverride = nil
         timeoutOverride = nil
+        deepGlobalContentOverride = nil
         errorMessage = nil
     }
 }

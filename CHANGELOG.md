@@ -11,6 +11,16 @@ in the same commit as each version bump — see [docs/RELEASES.md](docs/RELEASES
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-25
+
+### Added
+
+- **Content Search (`Name | Content` mode in search bar)**: search text inside files alongside filename search, with a dedicated `ContentSearchResultsView` showing each matching file once with its native icon, relative path, match count pill, file size, and highlighted line-numbered monospaced snippets
+- **Streaming `ripgrep` (`rg --json`) for folder content search**: parses `rg --json` incrementally (handling UTF-8 byte-to-character offsets, base64 payloads, and minified-line centering) with immediate early cutoff, per-file snippet grouping (`SearchRingMerger.upsert`), and a cycle-safe, binary-aware, size-bounded Swift fallback scanner (`ContentFileScanner.walkAndScan`) when `rg` is not installed
+- **Safe Global Content search + opt-in Deep Disk Scan**: defaults to Spotlight `kMDItemTextContent` streaming (fast, covers PDFs/docs, avoids waking cloud files) with automatic preview snippet extraction for small local text files, progressive current-folder `rg` ring on top, and an inline **Deep Disk Scan (rg)** button in `SearchStatusBanner` when you want unindexed code/text files scanned directly on disk
+- **Settings → Search → Content Search (grep)**: configure max file size (`1 MB / 5 MB / 25 MB / Unlimited`), snippets per file (`3 / 5 / 10`), `.gitignore` respect toggle, and Global deep ripgrep default
+- **Pure unit test suite (`ContentSearchTests`)**: 8 new tests covering `rg --json` parsing, UTF-8/base64 offsets, long minified line windowing, binary & oversized file skipping, cycle-safe fallback content walk, snippet upsert deduplication, and preference persistence
+
 ## [1.8.0] — 2026-11-25
 
 ### Added

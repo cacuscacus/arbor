@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchBarView: View {
     @Binding var query: String
     @Binding var scope: SearchScope
+    @Binding var mode: SearchMode
     var isSearching: Bool
     var resultCount: Int?
     var activeLimit: Int = SearchOptions.defaultResultLimit
@@ -15,14 +16,14 @@ struct SearchBarView: View {
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass")
+                Image(systemName: mode == .content ? "doc.text.magnifyingglass" : "magnifyingglass")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
 
                 TextField(placeholder, text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .frame(minWidth: 160, idealWidth: 220, maxWidth: 280)
+                    .frame(minWidth: 150, idealWidth: 210, maxWidth: 270)
                     .focused(focus)
 
                 // Keep a stable trailing slot so ProgressView ↔ clear-button
@@ -58,20 +59,29 @@ struct SearchBarView: View {
             .padding(.vertical, 4)
             .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
 
+            Picker("Mode", selection: $mode) {
+                Text("Name").tag(SearchMode.name)
+                Text("Content").tag(SearchMode.content)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 132)
+            .help("Search filenames or file contents")
+
             Picker("Scope", selection: $scope) {
                 Text("Folder").tag(SearchScope.currentFolder)
                 Text("Global").tag(SearchScope.global)
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 140)
+            .frame(width: 132)
             .help("Search scope")
 
             Text(resultCount.map(resultLabel) ?? " ")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .frame(minWidth: 40, alignment: .trailing)
+                .frame(minWidth: 36, alignment: .trailing)
                 .opacity(resultCount != nil && !query.isEmpty ? 1 : 0)
                 .accessibilityHidden(resultCount == nil || query.isEmpty)
 
@@ -102,11 +112,15 @@ struct SearchBarView: View {
     }
 
     private var placeholder: String {
-        switch scope {
-        case .currentFolder:
+        switch (mode, scope) {
+        case (.name, .currentFolder):
             return "Search folder — try *.json"
-        case .global:
+        case (.name, .global):
             return "Search home — try blabla*.json"
+        case (.content, .currentFolder):
+            return "Search text in folder…"
+        case (.content, .global):
+            return "Search text across home…"
         }
     }
 
@@ -122,9 +136,10 @@ struct SearchBarView: View {
 }
 
 /// Bottom status bar shown while a search is active: live progress, elapsed time,
-/// concentric ring breakdown, explicit Stop button, and Load More / Continue controls.
+/// concentric ring breakdown, explicit Stop button, Load More / Continue, and Deep Scan (rg).
 struct SearchStatusBanner: View {
     var scope: SearchScope
+    var mode: SearchMode = .name
     var folderName: String
     var backend: SearchBackendKind
     var isSearching: Bool
@@ -136,6 +151,7 @@ struct SearchStatusBanner: View {
     var onStop: () -> Void
     var onExpandLimit: (Int) -> Void
     var onContinueTimeout: () -> Void
+    var onDeepScan: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -165,18 +181,31 @@ struct SearchStatusBanner: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .help("Stop searching and keep partial results")
-            } else if case .limitReached(let limit) = stopReason,
-                      let next = SearchOptions.nextExpandedLimit(after: limit)
-            {
-                Button("Load up to \(Self.formatCount(next))") {
-                    onExpandLimit(next)
+            } else {
+                if mode == .content,
+                   scope == .global,
+                   backend == .spotlightContent,
+                   let onDeepScan
+                {
+                    Button("Deep Disk Scan (rg)", action: onDeepScan)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .help("Scan unindexed code and text files across Home with ripgrep")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-            } else if case .timedOut = stopReason {
-                Button("Continue (+10s)", action: onContinueTimeout)
+
+                if case .limitReached(let limit) = stopReason,
+                   let next = SearchOptions.nextExpandedLimit(after: limit)
+                {
+                    Button("Load up to \(Self.formatCount(next))") {
+                        onExpandLimit(next)
+                    }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
+                } else if case .timedOut = stopReason {
+                    Button("Continue (+10s)", action: onContinueTimeout)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -192,32 +221,36 @@ struct SearchStatusBanner: View {
         }
     }
 
+    private var unitSingular: String { mode == .content ? "file" : "match" }
+    private var unitPlural: String { mode == .content ? "files" : "matches" }
+
     private var runningLabel: String {
         let elapsed = String(format: "%.1fs", elapsedSeconds)
-        let matchPart = hitCount > 0 ? " · \(Self.formatCount(hitCount)) \(hitCount == 1 ? "match" : "matches")" : ""
-        return "Searching \(scopeLabel) (\(backend.rawValue))… \(elapsed)\(matchPart)"
+        let matchPart = hitCount > 0 ? " · \(Self.formatCount(hitCount)) \(hitCount == 1 ? unitSingular : unitPlural)" : ""
+        let verb = mode == .content ? "Scanning text in" : "Searching"
+        return "\(verb) \(scopeLabel) (\(backend.rawValue))… \(elapsed)\(matchPart)"
     }
 
     private var finishedLabel: String {
         let elapsed = String(format: "%.1fs", elapsedSeconds)
         switch stopReason {
         case .limitReached(let limit):
-            return "Showing first \(Self.formatCount(limit)) matches (limit reached · \(elapsed))"
+            return "Showing first \(Self.formatCount(limit)) \(unitPlural) (limit reached · \(elapsed))"
         case .timedOut(let seconds):
-            return "Stopped after \(Int(seconds.rounded()))s — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? "match" : "matches")"
+            return "Stopped after \(Int(seconds.rounded()))s — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? unitSingular : unitPlural)"
         case .nodeLimitReached(let visited):
-            return "Scan limit reached (\(Self.formatCount(visited)) items) — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? "match" : "matches")"
+            return "Scan limit reached (\(Self.formatCount(visited)) items) — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? unitSingular : unitPlural)"
         case .stoppedByUser:
-            return "Search stopped — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? "match" : "matches")"
+            return "Search stopped — showing \(Self.formatCount(hitCount)) partial \(hitCount == 1 ? unitSingular : unitPlural)"
         case .completed, nil:
             if scope == .global {
                 let localCount = (countsByRing[.currentFolderDirect] ?? 0) + (countsByRing[.currentFolderSubtree] ?? 0)
                 let globalCount = countsByRing[.global] ?? 0
                 if localCount > 0, globalCount > 0 {
-                    return "\(Self.formatCount(localCount)) in \(folderName) · \(Self.formatCount(globalCount)) in Home (\(elapsed))"
+                    return "\(Self.formatCount(localCount)) in \(folderName) · \(Self.formatCount(globalCount)) in Home (\(backend.rawValue) · \(elapsed))"
                 }
             }
-            return "\(Self.formatCount(hitCount)) \(hitCount == 1 ? "match" : "matches") in \(scopeLabel) (\(backend.rawValue) · \(elapsed))"
+            return "\(Self.formatCount(hitCount)) \(hitCount == 1 ? unitSingular : unitPlural) in \(scopeLabel) (\(backend.rawValue) · \(elapsed))"
         }
     }
 

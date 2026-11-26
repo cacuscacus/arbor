@@ -25,6 +25,7 @@ let package = Package(
                 "SidebarDropRouting.swift",
                 "DragAutoScrollController.swift",
                 "SearchEngine.swift",
+                "ContentSearchEngine.swift",
                 "SearchPreferencesStore.swift",
             ]
         ),
